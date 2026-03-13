@@ -943,9 +943,9 @@ function TabCommande({ cart, setCart, boulangerieId, addToHistory, produits, set
 
   const addToCart = (product) => {
     setCart(prev => {
-      const key = product.ref || product.name;
-      const ex = prev.find(x => (x.ref || x.name) === key);
-      if (ex) return prev.map(x => (x.ref || x.name) === key ? { ...x, qty: x.qty + 1 } : x);
+      const key = (product.ref && product.name) ? `${product.ref}__${product.name}` : (product.ref || product.name);
+      const ex = prev.find(x => ((x.ref && x.name) ? `${x.ref}__${x.name}` : (x.ref || x.name)) === key);
+      if (ex) return prev.map(x => ((x.ref && x.name) ? `${x.ref}__${x.name}` : (x.ref || x.name)) === key ? { ...x, qty: x.qty + 1 } : x);
       return [...prev, { ...product, qty: 1 }];
     });
   };
@@ -1057,8 +1057,8 @@ function TabCommande({ cart, setCart, boulangerieId, addToHistory, produits, set
         {/* Product grid */}
         <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))", gap:10 }}>
           {filtered.map(product => {
-            const key = product.ref || product.name;
-            const inCart = cart.find(x => (x.ref || x.name) === key);
+            const key = (product.ref && product.name) ? `${product.ref}__${product.name}` : (product.ref || product.name);
+            const inCart = cart.find(x => ((x.ref && x.name) ? `${x.ref}__${x.name}` : (x.ref || x.name)) === key);
             return (
               <div key={key} style={{
                 background:"#fff", border: inCart ? "2px solid #8B4513" : "1.5px solid #EDD5B3",
