@@ -2417,7 +2417,7 @@ export default function App() {
     chargerCommandes();
     chargerEmballages();
     chargerMercuriale();
-    chargerFavoris(compte.boulangerieId || boulangerieId);
+    chargerFavoris(compteChoisi.boulangerieId);
   };
 
   if (!compte) return <LoginScreen onLogin={handleLogin} />;
