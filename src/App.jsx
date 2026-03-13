@@ -886,8 +886,9 @@ function TabCommande({ cart, setCart, boulangerieId, addToHistory, produits, set
     const q = search.toLowerCase();
     return produits.filter(p => {
       const mSearch = !q || p.name.toLowerCase().includes(q) || p.ref.toLowerCase().includes(q);
+      const pKey = (p.ref && p.name) ? `${p.ref}__${p.name}` : (p.ref || p.name);
       const mCat = filterCat === "Tous" ? true
-                 : filterCat === "⭐ Favoris" ? favoris.includes(p.ref || p.name)
+                 : filterCat === "⭐ Favoris" ? favoris.includes(pKey)
                  : p.cat === filterCat;
       return mSearch && mCat;
     });
