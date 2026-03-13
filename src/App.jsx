@@ -875,7 +875,7 @@ function MobileCartBar({ cart, boulangerieId, setCart, addToHistory }) {
   );
 }
 
-function TabCommande({ cart, setCart, boulangerieId, addToHistory, produits, setProduits }) {
+function TabCommande({ cart, setCart, boulangerieId, addToHistory, produits, setProduits, favoris, toggleFavori }) {
   const [search, setSearch] = useState("");
   const [filterCat, setFilterCat] = useState("Tous");
   const [showModal, setShowModal] = useState(false);
@@ -886,10 +886,12 @@ function TabCommande({ cart, setCart, boulangerieId, addToHistory, produits, set
     const q = search.toLowerCase();
     return produits.filter(p => {
       const mSearch = !q || p.name.toLowerCase().includes(q) || p.ref.toLowerCase().includes(q);
-      const mCat = filterCat === "Tous" || p.cat === filterCat;
+      const mCat = filterCat === "Tous" ? true
+                 : filterCat === "⭐ Favoris" ? favoris.includes(p.ref || p.name)
+                 : p.cat === filterCat;
       return mSearch && mCat;
     });
-  }, [search, filterCat, produits]);
+  }, [search, filterCat, produits, favoris]);
 
   const handleImportMercuriale = async (e) => {
     const file = e.target.files[0];
@@ -1013,6 +1015,21 @@ function TabCommande({ cart, setCart, boulangerieId, addToHistory, produits, set
 
         {/* Category pills */}
         <div style={{ display:"flex", gap:5, marginBottom:14, flexWrap:"wrap" }}>
+          {/* Pill Favoris */}
+          <button onClick={() => setFilterCat("⭐ Favoris")}
+            style={{
+              padding:"4px 11px", borderRadius:16,
+              border: filterCat === "⭐ Favoris" ? "1px solid #F5A623" : "1px solid #F5A623",
+              background: filterCat === "⭐ Favoris" ? "#F5A623" : "#FFFDE7",
+              color: filterCat === "⭐ Favoris" ? "#fff" : "#B8860B",
+              cursor:"pointer", fontSize:11, fontWeight:700, transition:"all .15s",
+              display:"flex", alignItems:"center", gap:3
+            }}>
+            ⭐ Favoris
+            <span style={{ fontSize:9, color: filterCat === "⭐ Favoris" ? "#fff9" : "#b89878" }}>
+              ({favoris.length})
+            </span>
+          </button>
           {CATEGORIES.map(c => (
             <button key={c} onClick={() => setFilterCat(c)}
               style={{
@@ -1025,7 +1042,7 @@ function TabCommande({ cart, setCart, boulangerieId, addToHistory, produits, set
               {CAT_ICONS[c] || ""} {c}
               {filterCat !== c && (
                 <span style={{ fontSize:9, color:"#b89878" }}>
-                  ({ALL_PRODUCTS.filter(p => c === "Tous" || p.cat === c).length})
+                  ({produits.filter(p => c === "Tous" || p.cat === c).length})
                 </span>
               )}
             </button>
@@ -1034,7 +1051,7 @@ function TabCommande({ cart, setCart, boulangerieId, addToHistory, produits, set
 
         {/* Count */}
         <div style={{ fontSize:11, color:"#9B7B5A", marginBottom:10 }}>
-          {filtered.length} produit(s) affiché(s) sur {ALL_PRODUCTS.length}
+          {filtered.length} produit(s) affiché(s) sur {produits.length}
         </div>
 
         {/* Product grid */}
@@ -1061,9 +1078,21 @@ function TabCommande({ cart, setCart, boulangerieId, addToHistory, produits, set
                     )}
                     <div style={{ fontWeight:700, fontSize:12, color:"#2C1810", lineHeight:1.35 }}>{product.name}</div>
                   </div>
-                  <span style={{ fontSize:9, background:"#f5f5f5", color:"#666", padding:"2px 6px", borderRadius:8, whiteSpace:"nowrap", flexShrink:0 }}>
-                    {CAT_ICONS[product.cat]} {product.cat}
-                  </span>
+                  <div style={{ display:"flex", alignItems:"center", gap:4, flexShrink:0 }}>
+                    <button onClick={e => { e.stopPropagation(); toggleFavori(key); }}
+                      title={favoris.includes(key) ? "Retirer des favoris" : "Ajouter aux favoris"}
+                      style={{
+                        background:"none", border:"none", cursor:"pointer",
+                        fontSize:16, lineHeight:1, padding:2,
+                        filter: favoris.includes(key) ? "none" : "grayscale(1) opacity(0.4)",
+                        transition:"all .15s"
+                      }}>
+                      ⭐
+                    </button>
+                    <span style={{ fontSize:9, background:"#f5f5f5", color:"#666", padding:"2px 6px", borderRadius:8, whiteSpace:"nowrap" }}>
+                      {CAT_ICONS[product.cat]} {product.cat}
+                    </span>
+                  </div>
                 </div>
                 {product.unit && product.unit !== "1" && (
                   <div style={{ fontSize:10, color:"#9B7B5A" }}>Cond. : {product.unit}</div>
@@ -2234,6 +2263,36 @@ export default function App() {
     } catch(e) { console.error("Erreur chargement mercuriale", e); }
   };
 
+  // ── Favoris ──
+  const [favoris, setFavoris] = useState([]);
+
+  const chargerFavoris = async (boulId) => {
+    if (!boulId) return;
+    try {
+      const res = await fetch(SHEETS_URL + `?action=getFavoris&boulangerieId=${boulId}`);
+      const text = await res.text();
+      const data = JSON.parse(text);
+      if (data.success) setFavoris(data.favoris || []);
+    } catch(e) { console.error("Erreur chargement favoris", e); }
+  };
+
+  const toggleFavori = async (key) => {
+    const boulId = boulangerieId;
+    if (!boulId) return;
+    const nouveaux = favoris.includes(key)
+      ? favoris.filter(f => f !== key)
+      : [...favoris, key];
+    setFavoris(nouveaux);
+    try {
+      const params = new URLSearchParams({
+        action: "saveFavoris",
+        boulangerieId: boulId,
+        favoris: JSON.stringify(nouveaux)
+      });
+      await fetch(SHEETS_URL + "?" + params.toString(), { method:"GET", mode:"no-cors" });
+    } catch(e) { console.error("Erreur sauvegarde favoris", e); }
+  };
+
   // ── Emballages ──
   const [emballages, setEmballages] = useState([]);
   const [cmdEmb, setCmdEmb] = useState([]);
@@ -2349,6 +2408,7 @@ export default function App() {
     chargerCommandes();
     chargerEmballages();
     chargerMercuriale();
+    chargerFavoris(compte.boulangerieId || boulangerieId);
   };
 
   if (!compte) return <LoginScreen onLogin={handleLogin} />;
@@ -2517,7 +2577,7 @@ export default function App() {
       <div className="pap-content">
         <div className="pap-card-inner" style={{ background:"#fff", borderRadius:14, boxShadow:"0 2px 14px rgba(139,69,19,.07)", border:"1px solid #EDD5B3", minHeight:400 }}>
           {tab==="dashboard"   && <TabDashboard history={historyVisible} />}
-          {tab==="commande"    && <TabCommande cart={cart} setCart={setCart} boulangerieId={boulangerieId} addToHistory={addToHistory} produits={produits} setProduits={setProduits} />}
+          {tab==="commande"    && <TabCommande cart={cart} setCart={setCart} boulangerieId={boulangerieId} addToHistory={addToHistory} produits={produits} setProduits={setProduits} favoris={favoris} toggleFavori={toggleFavori} />}
           {tab==="emballages"  && <TabEmballages emballages={emballages} boulangerieId={boulangerieId} isAdmin={isAdmin} onAjouter={ajouterEmballage} onModifierStock={modifierStockEmb} onCommander={passerCommandeEmb} />}
           {tab==="historique"  && <TabHistorique history={historyVisible} onUpdateStatus={updateStatus} onUpdateCommande={updateCommande} isAdmin={isAdmin} />}
         </div>
