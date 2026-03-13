@@ -923,13 +923,21 @@ function TabCommande({ cart, setCart, boulangerieId, addToHistory, produits, set
         return;
       }
 
-      // Sauvegarde dans Google Sheets
+      // Sauvegarde dans Google Sheets par lots de 50
       setImportMsg({ type: "loading", text: "⏳ Sauvegarde dans Google Sheets…" });
-      const params = new URLSearchParams({
-        action: "saveMercuriale",
-        produits: JSON.stringify(nouveaux)
-      });
-      await fetch(SHEETS_URL + "?" + params.toString(), { method: "GET", mode: "no-cors" });
+      const BATCH = 50;
+      for (let b = 0; b < nouveaux.length; b += BATCH) {
+        const lot = nouveaux.slice(b, b + BATCH);
+        const isFirst = b === 0;
+        const params = new URLSearchParams({
+          action: "saveMercuriale",
+          reset: isFirst ? "1" : "0",
+          produits: JSON.stringify(lot)
+        });
+        await fetch(SHEETS_URL + "?" + params.toString(), { method: "GET", mode: "no-cors" });
+        // Petite pause entre les lots
+        await new Promise(r => setTimeout(r, 300));
+      }
 
       setProduits(nouveaux);
       setImportMsg({ type: "success", text: `✅ ${nouveaux.length} produits importés et sauvegardés depuis "${sheetName}"` });
