@@ -924,15 +924,21 @@ function TabCommande({ cart, setCart, boulangerieId, addToHistory, produits, set
         return;
       }
 
-      // Sauvegarde dans Google Sheets en POST (pas de limite de taille)
+      // Sauvegarde dans Google Sheets par lots de 50
       setImportMsg({ type: "loading", text: "⏳ Sauvegarde dans Google Sheets…" });
-      const body = JSON.stringify({ action: "saveMercuriale", produits: nouveaux });
-      await fetch(SHEETS_URL, {
-        method: "POST",
-        mode: "no-cors",
-        headers: { "Content-Type": "application/json" },
-        body
-      });
+      const BATCH = 50;
+      for (let b = 0; b < nouveaux.length; b += BATCH) {
+        const lot = nouveaux.slice(b, b + BATCH);
+        const isFirst = b === 0;
+        const params = new URLSearchParams({
+          action: "saveMercuriale",
+          reset: isFirst ? "1" : "0",
+          produits: JSON.stringify(lot)
+        });
+        await fetch(SHEETS_URL + "?" + params.toString(), { method: "GET", mode: "no-cors" });
+        // Petite pause entre les lots
+        await new Promise(r => setTimeout(r, 300));
+      }
 
       setProduits(nouveaux);
       setImportMsg({ type: "success", text: `✅ ${nouveaux.length} produits importés et sauvegardés depuis "${sheetName}"` });
@@ -1130,12 +1136,12 @@ function TabCommande({ cart, setCart, boulangerieId, addToHistory, produits, set
         )}
       </div>
       <div className="commande-cart">
-        <CartPanel cart={cart} setCart={setCart} boulangerieId={boulangerieId} addToHistory={addToHistory} />
+        <CartPanel cart={cart} setCart={setCartWithSave} boulangerieId={boulangerieId} addToHistory={addToHistory} />
       </div>
     </div>
 
     {/* Barre panier fixe mobile */}
-    <MobileCartBar cart={cart} boulangerieId={boulangerieId} setCart={setCart} addToHistory={addToHistory} />
+    <MobileCartBar cart={cart} boulangerieId={boulangerieId} setCart={setCartWithSave} addToHistory={addToHistory} />
     </>
   );
 }
@@ -2296,6 +2302,45 @@ export default function App() {
     } catch(e) { console.error("Erreur sauvegarde favoris", e); }
   };
 
+  // ── Brouillon panier ──
+  const [brouillon, setBrouillon] = useState(null); // brouillon chargé au login
+  const [brouillonSaving, setBrouillonSaving] = useState(false);
+
+  const sauvegarderBrouillon = async (newCart, boulId) => {
+    if (!boulId) return;
+    setBrouillonSaving(true);
+    try {
+      const params = new URLSearchParams({
+        action: "saveBrouillon",
+        boulangerieId: boulId,
+        cart: JSON.stringify(newCart)
+      });
+      await fetch(SHEETS_URL + "?" + params.toString(), { method: "GET", mode: "no-cors" });
+    } catch(e) { console.error("Erreur sauvegarde brouillon", e); }
+    setBrouillonSaving(false);
+  };
+
+  const chargerBrouillon = async (boulId) => {
+    if (!boulId) return;
+    try {
+      const res = await fetch(SHEETS_URL + `?action=getBrouillon&boulangerieId=${boulId}`);
+      const text = await res.text();
+      const data = JSON.parse(text);
+      if (data.success && data.cart && data.cart.length > 0) {
+        setBrouillon(data.cart);
+      }
+    } catch(e) { console.error("Erreur chargement brouillon", e); }
+  };
+
+  // Wrapper setCart qui sauvegarde automatiquement le brouillon
+  const setCartWithSave = (updater) => {
+    setCart(prev => {
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      sauvegarderBrouillon(next, boulangerieId);
+      return next;
+    });
+  };
+
   // ── Emballages ──
   const [emballages, setEmballages] = useState([]);
   const [cmdEmb, setCmdEmb] = useState([]);
@@ -2411,7 +2456,8 @@ export default function App() {
     chargerCommandes();
     chargerEmballages();
     chargerMercuriale();
-    chargerFavoris(compte.boulangerieId || boulangerieId);
+    chargerFavoris(compteChoisi.boulangerieId);
+    chargerBrouillon(compteChoisi.boulangerieId);
   };
 
   if (!compte) return <LoginScreen onLogin={handleLogin} />;
@@ -2422,6 +2468,9 @@ export default function App() {
     : history.filter(c => c.boulangerie === BOULANGERIES.find(b => b.id === compte.boulangerieId)?.name);
 
   const addToHistory = async (cmd) => {
+    // Effacer le brouillon quand la commande est validée
+    sauvegarderBrouillon([], boulangerieId);
+    setBrouillon(null);
     // Ajout immédiat en local
     setHistory(prev => [cmd, ...prev]);
     // Envoi vers Google Sheets via no-cors
@@ -2550,6 +2599,42 @@ export default function App() {
         </div>
       </div>
 
+      {/* Bannière brouillon */}
+      {brouillon && cart.length === 0 && (
+        <div style={{
+          background:"#FFF8E1", borderBottom:"2px solid #F5A623",
+          padding:"10px 20px", display:"flex", alignItems:"center",
+          justifyContent:"space-between", gap:12, flexWrap:"wrap"
+        }}>
+          <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+            <span style={{ fontSize:18 }}>🛒</span>
+            <span style={{ fontSize:12, fontWeight:700, color:"#7D5A00" }}>
+              Vous avez un panier en cours ({brouillon.length} article{brouillon.length > 1 ? "s" : ""})
+            </span>
+          </div>
+          <div style={{ display:"flex", gap:8 }}>
+            <button
+              onClick={() => { setCartWithSave(brouillon); setBrouillon(null); }}
+              style={{
+                padding:"6px 14px", borderRadius:7, border:"none",
+                background:"#F5A623", color:"#fff", fontWeight:700,
+                fontSize:12, cursor:"pointer", fontFamily:"Georgia, serif"
+              }}>
+              ↩ Reprendre le panier
+            </button>
+            <button
+              onClick={() => { sauvegarderBrouillon([], boulangerieId); setBrouillon(null); }}
+              style={{
+                padding:"6px 14px", borderRadius:7, border:"1px solid #ccc",
+                background:"#fff", color:"#999", fontWeight:600,
+                fontSize:12, cursor:"pointer", fontFamily:"Georgia, serif"
+              }}>
+              ✕ Ignorer
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Tabs */}
       <div className="pap-tabs" style={{ background:"#fff", display:"flex", borderBottom:"1px solid #E8D5B7" }}>
         {tabs.map(t => (
@@ -2580,7 +2665,7 @@ export default function App() {
       <div className="pap-content">
         <div className="pap-card-inner" style={{ background:"#fff", borderRadius:14, boxShadow:"0 2px 14px rgba(139,69,19,.07)", border:"1px solid #EDD5B3", minHeight:400 }}>
           {tab==="dashboard"   && <TabDashboard history={historyVisible} />}
-          {tab==="commande"    && <TabCommande cart={cart} setCart={setCart} boulangerieId={boulangerieId} addToHistory={addToHistory} produits={produits} setProduits={setProduits} favoris={favoris} toggleFavori={toggleFavori} />}
+          {tab==="commande"    && <TabCommande cart={cart} setCart={setCartWithSave} boulangerieId={boulangerieId} addToHistory={addToHistory} produits={produits} setProduits={setProduits} favoris={favoris} toggleFavori={toggleFavori} />}
           {tab==="emballages"  && <TabEmballages emballages={emballages} boulangerieId={boulangerieId} isAdmin={isAdmin} onAjouter={ajouterEmballage} onModifierStock={modifierStockEmb} onCommander={passerCommandeEmb} />}
           {tab==="historique"  && <TabHistorique history={historyVisible} onUpdateStatus={updateStatus} onUpdateCommande={updateCommande} isAdmin={isAdmin} />}
         </div>
