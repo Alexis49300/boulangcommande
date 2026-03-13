@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef } from "react";
 import { jsPDF } from "jspdf";
 
 const responsiveStyles = `
@@ -875,19 +875,69 @@ function MobileCartBar({ cart, boulangerieId, setCart, addToHistory }) {
   );
 }
 
-function TabCommande({ cart, setCart, boulangerieId, addToHistory }) {
+function TabCommande({ cart, setCart, boulangerieId, addToHistory, produits, setProduits }) {
   const [search, setSearch] = useState("");
   const [filterCat, setFilterCat] = useState("Tous");
   const [showModal, setShowModal] = useState(false);
+  const [importMsg, setImportMsg] = useState(null);
+  const fileInputRef = useRef(null);
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
-    return ALL_PRODUCTS.filter(p => {
+    return produits.filter(p => {
       const mSearch = !q || p.name.toLowerCase().includes(q) || p.ref.toLowerCase().includes(q);
       const mCat = filterCat === "Tous" || p.cat === filterCat;
       return mSearch && mCat;
     });
-  }, [search, filterCat]);
+  }, [search, filterCat, produits]);
+
+  const handleImportMercuriale = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setImportMsg({ type: "loading", text: "⏳ Lecture du fichier…" });
+    try {
+      const XLSX = await import("https://cdn.jsdelivr.net/npm/xlsx@0.18.5/xlsx.mjs");
+      const buffer = await file.arrayBuffer();
+      const wb = XLSX.read(buffer, { type: "array" });
+      const sheetName = wb.SheetNames.find(n => n.includes("TARIFS")) || wb.SheetNames[0];
+      const ws = wb.Sheets[sheetName];
+      const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null });
+
+      const nouveaux = [];
+      for (let i = 2; i < rows.length; i++) {
+        const row = rows[i];
+        const ref  = row[0] ? String(row[0]).trim() : "";
+        const name = row[1] ? String(row[1]).trim() : "";
+        const unit = row[2] != null ? String(row[2]) : "1";
+        const four = row[8] ? String(row[8]).trim() : "";
+        const prix = parseFloat(row[9]);
+        if (!name || isNaN(prix) || prix <= 0) continue;
+        const ancien = ALL_PRODUCTS.find(p => p.ref === ref || p.name === name);
+        const cat = ancien?.cat || "Divers";
+        nouveaux.push({ ref, name, unit, prix_ht: prix, tva: 0.055, cat, four });
+      }
+      if (nouveaux.length === 0) {
+        setImportMsg({ type: "error", text: "❌ Aucun produit trouvé dans le fichier." });
+        return;
+      }
+
+      // Sauvegarde dans Google Sheets
+      setImportMsg({ type: "loading", text: "⏳ Sauvegarde dans Google Sheets…" });
+      const params = new URLSearchParams({
+        action: "saveMercuriale",
+        produits: JSON.stringify(nouveaux)
+      });
+      await fetch(SHEETS_URL + "?" + params.toString(), { method: "GET", mode: "no-cors" });
+
+      setProduits(nouveaux);
+      setImportMsg({ type: "success", text: `✅ ${nouveaux.length} produits importés et sauvegardés depuis "${sheetName}"` });
+      setTimeout(() => setImportMsg(null), 6000);
+    } catch(err) {
+      console.error(err);
+      setImportMsg({ type: "error", text: "❌ Erreur lors de la lecture du fichier." });
+    }
+    e.target.value = "";
+  };
 
   const addToCart = (product) => {
     setCart(prev => {
@@ -933,7 +983,33 @@ function TabCommande({ cart, setCart, boulangerieId, addToHistory }) {
             ✏️ Produit hors mercuriale
           </button>
           <MercurialeLink />
+          {/* Import mercuriale */}
+          <input ref={fileInputRef} type="file" accept=".xlsx,.xls" onChange={handleImportMercuriale}
+            style={{ display:"none" }} />
+          <button onClick={() => fileInputRef.current?.click()}
+            style={{
+              display:"inline-flex", alignItems:"center", gap:6,
+              padding:"9px 16px", borderRadius:9, border:"2px solid #217346",
+              background:"#f0fff4", color:"#217346", cursor:"pointer",
+              fontSize:12, fontWeight:700, fontFamily:"Georgia, serif",
+              whiteSpace:"nowrap", transition:"all .15s"
+            }}
+            onMouseEnter={e => { e.currentTarget.style.background="#217346"; e.currentTarget.style.color="#fff"; }}
+            onMouseLeave={e => { e.currentTarget.style.background="#f0fff4"; e.currentTarget.style.color="#217346"; }}
+          >
+            📥 Importer mercuriale
+          </button>
         </div>
+        {importMsg && (
+          <div style={{
+            marginBottom:10, padding:"9px 14px", borderRadius:8, fontSize:12, fontWeight:600,
+            background: importMsg.type === "success" ? "#f0fff4" : importMsg.type === "error" ? "#fff5f5" : "#fffde7",
+            color: importMsg.type === "success" ? "#217346" : importMsg.type === "error" ? "#c0392b" : "#7D6608",
+            border: `1.5px solid ${importMsg.type === "success" ? "#27ae60" : importMsg.type === "error" ? "#e74c3c" : "#f39c12"}`
+          }}>
+            {importMsg.text}
+          </div>
+        )}
 
         {/* Category pills */}
         <div style={{ display:"flex", gap:5, marginBottom:14, flexWrap:"wrap" }}>
@@ -2144,6 +2220,20 @@ export default function App() {
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState(false);
 
+  // ── Mercuriale ──
+  const [produits, setProduits] = useState(ALL_PRODUCTS);
+
+  const chargerMercuriale = async () => {
+    try {
+      const res = await fetch(SHEETS_URL + "?action=getMercuriale");
+      const text = await res.text();
+      const data = JSON.parse(text);
+      if (data.success && data.produits && data.produits.length > 0) {
+        setProduits(data.produits);
+      }
+    } catch(e) { console.error("Erreur chargement mercuriale", e); }
+  };
+
   // ── Emballages ──
   const [emballages, setEmballages] = useState([]);
   const [cmdEmb, setCmdEmb] = useState([]);
@@ -2258,6 +2348,7 @@ export default function App() {
     if (compteChoisi.boulangerieId) setBoulangerieId(compteChoisi.boulangerieId);
     chargerCommandes();
     chargerEmballages();
+    chargerMercuriale();
   };
 
   if (!compte) return <LoginScreen onLogin={handleLogin} />;
@@ -2426,7 +2517,7 @@ export default function App() {
       <div className="pap-content">
         <div className="pap-card-inner" style={{ background:"#fff", borderRadius:14, boxShadow:"0 2px 14px rgba(139,69,19,.07)", border:"1px solid #EDD5B3", minHeight:400 }}>
           {tab==="dashboard"   && <TabDashboard history={historyVisible} />}
-          {tab==="commande"    && <TabCommande cart={cart} setCart={setCart} boulangerieId={boulangerieId} addToHistory={addToHistory} />}
+          {tab==="commande"    && <TabCommande cart={cart} setCart={setCart} boulangerieId={boulangerieId} addToHistory={addToHistory} produits={produits} setProduits={setProduits} />}
           {tab==="emballages"  && <TabEmballages emballages={emballages} boulangerieId={boulangerieId} isAdmin={isAdmin} onAjouter={ajouterEmballage} onModifierStock={modifierStockEmb} onCommander={passerCommandeEmb} />}
           {tab==="historique"  && <TabHistorique history={historyVisible} onUpdateStatus={updateStatus} onUpdateCommande={updateCommande} isAdmin={isAdmin} />}
         </div>
