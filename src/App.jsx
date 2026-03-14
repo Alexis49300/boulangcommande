@@ -2335,7 +2335,7 @@ function TabPatisserie({ boulangerieId, compte, isAdmin }) {
     setSaving(false);
   }
 
-  function marquerLivrePatisserie(cmdId, prod) {
+  async function marquerLivrePatisserie(cmdId, prod) {
     setHistorique(prev => prev.map(c => {
       if (c.id !== cmdId) return c;
       const updated = {...c};
