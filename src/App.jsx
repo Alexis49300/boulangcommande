@@ -2242,9 +2242,11 @@ function TabPatisserie({ boulangerieId, compte, isAdmin }) {
   };
 
   const itemsVisible = catalogue.filter(p => {
-    if (!p.visible) return false;
-    const visibleList = Array.isArray(p.visible) ? p.visible : JSON.parse(p.visible || "[]");
-    return visibleList.includes(boulangerieNom) || visibleList.includes(String(boulangerieId));
+    if (!p.visible) return true; // si pas de visibilité définie, visible par tous
+    const raw = Array.isArray(p.visible) ? p.visible : JSON.parse(p.visible || "[]");
+    // Normalise tout en string pour comparaison fiable
+    const visibleList = raw.map(v => String(v));
+    return visibleList.includes(String(boulangerieId)) || visibleList.includes(boulangerieNom);
   });
 
   const filtered = itemsVisible.filter(p =>
