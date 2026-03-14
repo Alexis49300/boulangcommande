@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import { jsPDF } from "jspdf";
 
 const responsiveStyles = `
@@ -3099,7 +3099,7 @@ export default function App() {
     chargerCommandes();
     chargerEmballages();
     chargerMercuriale();
-    chargerFavoris(compte.boulangerieId || boulangerieId);
+    chargerFavoris(compteChoisi.boulangerieId);
   };
 
   if (!compte) return <LoginScreen onLogin={handleLogin} />;
