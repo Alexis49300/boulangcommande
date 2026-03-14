@@ -1136,12 +1136,12 @@ function TabCommande({ cart, setCart, boulangerieId, addToHistory, produits, set
         )}
       </div>
       <div className="commande-cart">
-        <CartPanel cart={cart} setCart={setCartWithSave} boulangerieId={boulangerieId} addToHistory={addToHistory} />
+        <CartPanel cart={cart} setCart={setCart} boulangerieId={boulangerieId} addToHistory={addToHistory} />
       </div>
     </div>
 
     {/* Barre panier fixe mobile */}
-    <MobileCartBar cart={cart} boulangerieId={boulangerieId} setCart={setCartWithSave} addToHistory={addToHistory} />
+    <MobileCartBar cart={cart} boulangerieId={boulangerieId} setCart={setCart} addToHistory={addToHistory} />
     </>
   );
 }
