@@ -2306,11 +2306,29 @@ function TabPatisserie({ boulangerieId, compte, isAdmin }) {
   };
 
 
+  function getMinDatePat() {
+    // Date minimum = aujourd'hui + délai max parmi les articles du panier
+    const maxDelai = panier.filter(p=>!p.excep).reduce((max, p) => Math.max(max, p.delai || 1), 1);
+    const min = new Date();
+    min.setDate(min.getDate() + maxDelai);
+    return min;
+  }
+
   async function validerCommandePat() {
     if (!panier.length) return;
     const dateInput = document.getElementById("pat-date-livraison");
     const d = dateInput?.value;
     if (!d) { alert("Veuillez saisir une date de livraison."); return; }
+    // Vérification du délai minimum
+    const minDate = getMinDatePat();
+    const dateLiv = new Date(d);
+    if (dateLiv < minDate) {
+      const maxDelai = panier.filter(p=>!p.excep).reduce((max, p) => Math.max(max, p.delai || 1), 1);
+      // Trouver l'article avec le délai le plus long
+      const articleDelai = panier.filter(p=>!p.excep).find(p => (p.delai||1) === maxDelai);
+      alert(`La date de livraison est trop proche. L'article "${articleDelai?.nom}" nécessite un délai minimum de J+${maxDelai}. Date minimum : ${minDate.toLocaleDateString("fr-FR")}`);
+      return;
+    }
     setSaving(true);
     const cmd = {
       id: "PAT-" + Date.now(),
@@ -2462,6 +2480,7 @@ function TabPatisserie({ boulangerieId, compte, isAdmin }) {
               <div>
                 <div style={{ fontSize:11, color:"#9B7B5A", marginBottom:4 }}>Date de livraison souhaitée</div>
                 <input type="date" id="pat-date-livraison"
+                  min={(() => { const maxDelai = panier.filter(p=>!p.excep).reduce((max,p)=>Math.max(max,p.delai||1),1); const d=new Date(); d.setDate(d.getDate()+maxDelai); return d.toISOString().split("T")[0]; })()}
                   style={{ padding:"7px 10px", border:"2px solid #D4A96A", borderRadius:8, background:"#fffaf5", fontSize:12, color:"#2C1810", width:"100%" }}/>
               </div>
             </div>
