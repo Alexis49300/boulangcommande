@@ -2631,7 +2631,7 @@ function TabPatisserie({ boulangerieId, compte, isAdmin }) {
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF({ orientation:"portrait", unit:"mm", format:"a4" });
     const W=210, m=18;
-    doc.setFillColor(139,69,19); doc.rect(0,0,W,28,\"F\");
+    doc.setFillColor(139,69,19); doc.rect(0,0,W,28,"F");
     doc.setTextColor(255,255,255); doc.setFontSize(16); doc.setFont("helvetica","bold");
     doc.text("BON DE LIVRAISON — "+prod, m, 12);
     doc.setFontSize(9); doc.setFont("helvetica","normal");
