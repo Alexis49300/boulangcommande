@@ -2174,15 +2174,14 @@ function TabPatisserie({ boulangerieId, compte, isAdmin }) {
   const [loadingCat, setLoadingCat] = useState(true);
 
   // Brouillon panier
-  const brouillonKey = `pat_brouillon_${boulangerieId}`;
-  const saveBrouillon = async (newPanier) => {
+  async function saveBrouillon(newPanier) {
     try {
       const params = new URLSearchParams({ action: "savePatBrouillon", boulangerieId, cart: JSON.stringify(newPanier) });
       await fetch(PAT_URL + "?" + params.toString(), { method: "GET", mode: "no-cors" });
     } catch(e) {}
   };
 
-  const setPanierWithSave = (updater) => {
+  function setPanierWithSave(updater) {
     setPanier(prev => {
       const next = typeof updater === "function" ? updater(prev) : updater;
       if (boulangerieId) saveBrouillon(next);
@@ -2190,7 +2189,7 @@ function TabPatisserie({ boulangerieId, compte, isAdmin }) {
     });
   };
 
-  const chargerCatalogue = async () => {
+  async function chargerCatalogue() {
     setLoadingCat(true);
     try {
       const res = await fetch(PAT_URL + "?action=getCataloguePat");
@@ -2200,7 +2199,7 @@ function TabPatisserie({ boulangerieId, compte, isAdmin }) {
     setLoadingCat(false);
   };
 
-  const chargerHistoriquePatisserie = async () => {
+  async function chargerHistoriquePatisserie() {
     try {
       const res = await fetch(PAT_URL + `?action=getHistoriquePat&boulangerieId=${boulangerieId}&isProducteur=${isProducteur}&producteurNom=${encodeURIComponent(producteurNom||"")}`);
       const data = JSON.parse(await res.text());
@@ -2208,7 +2207,7 @@ function TabPatisserie({ boulangerieId, compte, isAdmin }) {
     } catch(e) {}
   };
 
-  const chargerBrouillonPat = async () => {
+  async function chargerBrouillonPat() {
     if (!boulangerieId) return;
     try {
       const res = await fetch(PAT_URL + `?action=getPatBrouillon&boulangerieId=${boulangerieId}`);
@@ -2224,7 +2223,7 @@ function TabPatisserie({ boulangerieId, compte, isAdmin }) {
     chargerBrouillonPat();
   }, [boulangerieId]);
 
-  const isModifiable = (cmd) => {
+  function isModifiable(cmd) {
     if (isProducteur) return false;
     const now = new Date();
     const livraison = new Date(cmd.dateLivraisonISO);
@@ -2234,7 +2233,7 @@ function TabPatisserie({ boulangerieId, compte, isAdmin }) {
     return now <= limite;
   };
 
-  const getDelaiRestant = (cmd) => {
+  function getDelaiRestant(cmd) {
     const now = new Date();
     const livraison = new Date(cmd.dateLivraisonISO);
     const maxDelai = Math.max(...cmd.items.map(i => i.delai || 1));
@@ -2261,7 +2260,7 @@ function TabPatisserie({ boulangerieId, compte, isAdmin }) {
   ).length;
 
   // ── RENDU TUILE PRODUIT ──
-  const renderTuile = (p) => {
+  function renderTuile(p) {
     const key = p.id;
     const inCart = panier.find(x => x.id === key);
     const qty = qtys[key] || 1;
