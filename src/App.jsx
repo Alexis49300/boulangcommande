@@ -2190,13 +2190,6 @@ function TabPatisserie({ boulangerieId, compte, isAdmin }) {
     });
   };
 
-  // Chargement catalogue + historique + brouillon
-  useEffect(() => {
-    chargerCatalogue();
-    chargerHistoriquePatisserie();
-    chargerBrouillonPat();
-  }, [boulangerieId]);
-
   const chargerCatalogue = async () => {
     setLoadingCat(true);
     try {
@@ -2223,6 +2216,13 @@ function TabPatisserie({ boulangerieId, compte, isAdmin }) {
       if (data.success && data.cart && data.cart.length > 0) setPanier(data.cart);
     } catch(e) {}
   };
+
+  // Chargement catalogue + historique + brouillon
+  useEffect(() => {
+    chargerCatalogue();
+    chargerHistoriquePatisserie();
+    chargerBrouillonPat();
+  }, [boulangerieId]);
 
   const isModifiable = (cmd) => {
     if (isProducteur) return false;
