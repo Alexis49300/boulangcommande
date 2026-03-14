@@ -2349,7 +2349,6 @@ function TabPatisserie({ boulangerieId, compte, isAdmin }) {
   function genererBLPat(cmd, prod) {
     const items = cmd.items?.filter(i=>i.prod===prod) || [];
     const total = items.filter(i=>!i.excep).reduce((s,i)=>s+Number(i.pachat)*i.qty,0);
-    const { jsPDF } = window.jspdf;
     const doc = new jsPDF({ orientation:"portrait", unit:"mm", format:"a4" });
     const W=210, m=18;
     doc.setFillColor(139,69,19); doc.rect(0,0,W,28,"F");
