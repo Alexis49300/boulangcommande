@@ -927,18 +927,7 @@ function TabCommande({ cart, setCart, boulangerieId, addToHistory, produits, set
       // Sauvegarde dans Google Sheets par lots de 50
       setImportMsg({ type: "loading", text: "⏳ Sauvegarde dans Google Sheets…" });
       const BATCH = 50;
-      for (let b = 0; b < nouveaux.length; b += BATCH) {
-        const lot = nouveaux.slice(b, b + BATCH);
-        const isFirst = b === 0;
-        const params = new URLSearchParams({
-          action: "saveMercuriale",
-          reset: isFirst ? "1" : "0",
-          produits: JSON.stringify(lot)
-        });
-        await fetch(SHEETS_URL + "?" + params.toString(), { method: "GET", mode: "no-cors" });
-        // Petite pause entre les lots
-        await new Promise(r => setTimeout(r, 300));
-      }
+      await postToSheets(SHEETS_URL, { action: "saveMercuriale", produits: nouveaux });
 
       setProduits(nouveaux);
       setImportMsg({ type: "success", text: `✅ ${nouveaux.length} produits importés et sauvegardés depuis "${sheetName}"` });
@@ -2175,8 +2164,7 @@ function TabPatisserie({ boulangerieId, compte, isAdmin }) {
   const brouillonKey = `pat_brouillon_${boulangerieId}`;
   const saveBrouillon = async (newPanier) => {
     try {
-      const params = new URLSearchParams({ action: "savePatBrouillon", boulangerieId, cart: JSON.stringify(newPanier) });
-      await fetch(PAT_URL + "?" + params.toString(), { method: "GET", mode: "no-cors" });
+      await postToSheets(PAT_URL, { action: "savePatBrouillon", boulangerieId, cart: newPanier });
     } catch(e) {}
   };
 
@@ -2337,8 +2325,7 @@ function TabPatisserie({ boulangerieId, compte, isAdmin }) {
       statusFerriere: panier.some(p=>p.prod==="La Ferrière") ? "En attente" : null,
     };
     try {
-      const params = new URLSearchParams({ action:"saveCommandePat", commande: JSON.stringify(cmd) });
-      await fetch(PAT_URL+"?"+params.toString(), { method:"GET", mode:"no-cors" });
+      await postToSheets(PAT_URL, { action: "saveCommandePat", commande: cmd });
       saveBrouillon([]);
       setPanier([]);
       setQtys({});
@@ -2354,8 +2341,7 @@ function TabPatisserie({ boulangerieId, compte, isAdmin }) {
       const updated = {...c};
       if (prod==="La Pause") updated.statusPause="Livré";
       if (prod==="La Ferrière") updated.statusFerriere="Livré";
-      const params = new URLSearchParams({ action:"updateStatusPat", id:cmdId, prod, status:"Livré" });
-      fetch(PAT_URL+"?"+params.toString(), { method:"GET", mode:"no-cors" });
+      await postToSheets(PAT_URL, { action: "updateStatusPat", id: cmdId, prod, status: "Livré" });
       return updated;
     }));
   }
@@ -2622,8 +2608,7 @@ function TabPatisserie({ boulangerieId, compte, isAdmin }) {
       {showModalArticle && <ModalArticlePat onClose={()=>setShowModalArticle(false)} onSave={async (art)=>{
         setSaving(true);
         try {
-          const params = new URLSearchParams({ action:"saveArticlePat", article: JSON.stringify(art) });
-          await fetch(PAT_URL+"?"+params.toString(), { method:"GET", mode:"no-cors" });
+          await postToSheets(PAT_URL, { action: "saveArticlePat", article: art });
           await chargerCatalogue();
         } catch(e){}
         setSaving(false);
@@ -2646,8 +2631,7 @@ function TabPatisserie({ boulangerieId, compte, isAdmin }) {
             const updated = {...modifCmd, items: modifItems.filter(i=>i.qty>0)};
             updated.total = updated.items.filter(i=>!i.excep).reduce((s,i)=>s+Number(i.pachat)*i.qty,0);
             try {
-              const params = new URLSearchParams({ action:"updateCommandePat", commande: JSON.stringify(updated) });
-              await fetch(PAT_URL+"?"+params.toString(), { method:"GET", mode:"no-cors" });
+              await postToSheets(PAT_URL, { action: "updateCommandePat", commande: updated });
               await chargerHistoriquePatisserie();
             } catch(e){}
             setSaving(false);
@@ -2758,6 +2742,18 @@ function LoginScreen({ onLogin }) {
 
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbxx2jIIJon7gjoOD3HZNKJfPvCxy7BAIq3oqRZcW3F-kof8hO4F5baU9J00jnk23cvqxA/exec";
 const PAT_URL    = SHEETS_URL; // réutilise le même Apps Script
+
+// ─── Helpers POST ─────────────────────────────────────────────────────────────
+const postToSheets = async (url, data) => {
+  await fetch(url, {
+    method: "POST",
+    mode: "no-cors",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data)
+  });
+};
+
+
 const EMB_URL    = "https://script.google.com/macros/s/AKfycbwIv4kiUS6P8yRYQC8_smlo92e4mZqdo641ytEzRWjeZFyb-PRdgUphHF88s9Cwlaa3/exec";
 
 // ── Sous-composants modaux ───────────────────────────────────────────────────
@@ -2977,12 +2973,7 @@ export default function App() {
       : [...favoris, key];
     setFavoris(nouveaux);
     try {
-      const params = new URLSearchParams({
-        action: "saveFavoris",
-        boulangerieId: boulId,
-        favoris: JSON.stringify(nouveaux)
-      });
-      await fetch(SHEETS_URL + "?" + params.toString(), { method:"GET", mode:"no-cors" });
+      await postToSheets(SHEETS_URL, { action: "saveFavoris", boulangerieId: boulId, favoris: nouveaux });
     } catch(e) { console.error("Erreur sauvegarde favoris", e); }
   };
 
@@ -3045,13 +3036,13 @@ export default function App() {
     setSyncing(true);
     setSyncError(false);
     try {
-      const params = new URLSearchParams({
+      await postToSheets(SHEETS_URL, {
+        action: "saveCommande",
         id: cmd.id, date: cmd.date, boulangerie: cmd.boulangerie,
         type: "Emballages",
         items: cmd.items, total: cmd.total, status: cmd.status,
-        detail: JSON.stringify(detail)
+        detail: detail
       });
-      await fetch(SHEETS_URL + "?" + params.toString(), { method:"GET", mode:"no-cors" });
       setSyncing(false);
     } catch(e) { setSyncError(true); setSyncing(false); console.error(e); }
     // Sync Google Sheets emballages
@@ -3118,21 +3109,16 @@ export default function App() {
     setSyncing(true);
     setSyncError(false);
     try {
-      await fetch(SHEETS_URL, {
-        method: "POST",
-        mode: "no-cors",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action:      "saveCommande",
-          id:          cmd.id,
-          date:        cmd.date,
-          boulangerie: cmd.boulangerie,
-          type:        cmd.type,
-          items:       cmd.items,
-          total:       cmd.total,
-          status:      cmd.status,
-          detail:      cmd.detail || []
-        })
+      await postToSheets(SHEETS_URL, {
+        action:      "saveCommande",
+        id:          cmd.id,
+        date:        cmd.date,
+        boulangerie: cmd.boulangerie,
+        type:        cmd.type,
+        items:       cmd.items,
+        total:       cmd.total,
+        status:      cmd.status,
+        detail:      cmd.detail || []
       });
       setSyncing(false);
     } catch(e) {
@@ -3153,8 +3139,7 @@ export default function App() {
       } catch(e) { console.error("Erreur mise à jour statut EMB", e); }
     }
     try {
-      const params = new URLSearchParams({ action: "updateStatus", id, status: newStatus });
-      await fetch(SHEETS_URL + "?" + params.toString(), { method: "GET", mode: "no-cors" });
+      await postToSheets(SHEETS_URL, { action: "updateStatus", id, status: newStatus });
     } catch(e) {
       console.error("Erreur mise à jour statut", e);
     }
@@ -3165,7 +3150,7 @@ export default function App() {
     setHistory(prev => prev.map(c => c.id === cmdModifiee.id ? cmdModifiee : c));
     // Mise à jour Google Sheets
     try {
-      const params = new URLSearchParams({
+      await postToSheets(SHEETS_URL, {
         action:      "updateCommande",
         id:          cmdModifiee.id,
         date:        cmdModifiee.date,
@@ -3174,9 +3159,8 @@ export default function App() {
         items:       cmdModifiee.items,
         total:       cmdModifiee.total,
         status:      cmdModifiee.status,
-        detail:      JSON.stringify(cmdModifiee.detail || [])
+        detail:      cmdModifiee.detail || []
       });
-      await fetch(SHEETS_URL + "?" + params.toString(), { method: "GET", mode: "no-cors" });
     } catch(e) {
       console.error("Erreur mise à jour commande", e);
     }
