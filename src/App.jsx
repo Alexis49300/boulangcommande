@@ -2148,6 +2148,688 @@ function TabDashboard({ history }) {
 
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
 // ─── COMPTES ─────────────────────────────────────────────────────────────────
+// ─── TAB PATISSERIE ──────────────────────────────────────────────────────────
+
+const PAT_URL = SHEETS_URL; // réutilise le même Apps Script
+
+function TabPatisserie({ boulangerieId, compte, isAdmin }) {
+  const boulangerieNom = BOULANGERIES.find(b => b.id === boulangerieId)?.name || "";
+  const isProducteur = boulangerieId === 4 || boulangerieId === 5; // La Ferrière (4) ou La Pause (5)
+  const canManageCatalogue = isAdmin || isProducteur;
+  const producteurNom = boulangerieId === 4 ? "La Ferrière" : boulangerieId === 5 ? "La Pause" : null;
+
+  const [tabPat, setTabPat] = useState("catalogue");
+  const [catalogue, setCatalogue] = useState([]);
+  const [panier, setPanier] = useState([]);
+  const [historique, setHistorique] = useState([]);
+  const [qtys, setQtys] = useState({});
+  const [filterText, setFilterText] = useState("");
+  const [filterProd, setFilterProd] = useState("");
+  const [showModalArticle, setShowModalArticle] = useState(false);
+  const [showModalExcep, setShowModalExcep] = useState(false);
+  const [showModalModif, setShowModalModif] = useState(false);
+  const [modifCmd, setModifCmd] = useState(null);
+  const [modifItems, setModifItems] = useState([]);
+  const [saving, setSaving] = useState(false);
+  const [loadingCat, setLoadingCat] = useState(true);
+
+  // Brouillon panier
+  const brouillonKey = `pat_brouillon_${boulangerieId}`;
+  const saveBrouillon = async (newPanier) => {
+    try {
+      const params = new URLSearchParams({ action: "savePatBrouillon", boulangerieId, cart: JSON.stringify(newPanier) });
+      await fetch(PAT_URL + "?" + params.toString(), { method: "GET", mode: "no-cors" });
+    } catch(e) {}
+  };
+
+  const setPanierWithSave = (updater) => {
+    setPanier(prev => {
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      if (boulangerieId) saveBrouillon(next);
+      return next;
+    });
+  };
+
+  // Chargement catalogue + historique + brouillon
+  useEffect(() => {
+    chargerCatalogue();
+    chargerHistoriquePatisserie();
+    chargerBrouillonPat();
+  }, [boulangerieId]);
+
+  const chargerCatalogue = async () => {
+    setLoadingCat(true);
+    try {
+      const res = await fetch(PAT_URL + "?action=getCataloguePat");
+      const data = JSON.parse(await res.text());
+      if (data.success && data.catalogue) setCatalogue(data.catalogue);
+    } catch(e) { console.error(e); }
+    setLoadingCat(false);
+  };
+
+  const chargerHistoriquePatisserie = async () => {
+    try {
+      const res = await fetch(PAT_URL + `?action=getHistoriquePat&boulangerieId=${boulangerieId}&isProducteur=${isProducteur}&producteurNom=${encodeURIComponent(producteurNom||"")}`);
+      const data = JSON.parse(await res.text());
+      if (data.success) setHistorique(data.commandes || []);
+    } catch(e) {}
+  };
+
+  const chargerBrouillonPat = async () => {
+    if (!boulangerieId) return;
+    try {
+      const res = await fetch(PAT_URL + `?action=getPatBrouillon&boulangerieId=${boulangerieId}`);
+      const data = JSON.parse(await res.text());
+      if (data.success && data.cart && data.cart.length > 0) setPanier(data.cart);
+    } catch(e) {}
+  };
+
+  const isModifiable = (cmd) => {
+    if (isProducteur) return false;
+    const now = new Date();
+    const livraison = new Date(cmd.dateLivraisonISO);
+    const maxDelai = Math.max(...cmd.items.map(i => i.delai || 1));
+    const limite = new Date(livraison);
+    limite.setDate(limite.getDate() - maxDelai);
+    return now <= limite;
+  };
+
+  const getDelaiRestant = (cmd) => {
+    const now = new Date();
+    const livraison = new Date(cmd.dateLivraisonISO);
+    const maxDelai = Math.max(...cmd.items.map(i => i.delai || 1));
+    const limite = new Date(livraison);
+    limite.setDate(limite.getDate() - maxDelai);
+    return Math.ceil((limite - now) / 86400000);
+  };
+
+  const itemsVisible = catalogue.filter(p => {
+    if (!p.visible) return false;
+    const visibleList = Array.isArray(p.visible) ? p.visible : JSON.parse(p.visible || "[]");
+    return visibleList.includes(boulangerieNom) || visibleList.includes(String(boulangerieId));
+  });
+
+  const filtered = itemsVisible.filter(p =>
+    (!filterText || p.nom.toLowerCase().includes(filterText.toLowerCase())) &&
+    (!filterProd || p.prod === filterProd)
+  );
+
+  const panierCount = panier.length;
+  const notifCount = historique.filter(cmd =>
+    cmd.items?.some(i => i.prod === producteurNom) &&
+    (producteurNom === "La Pause" ? cmd.statusPause : cmd.statusFerriere) === "En attente"
+  ).length;
+
+  // ── RENDU TUILE PRODUIT ──
+  const renderTuile = (p) => {
+    const key = p.id;
+    const inCart = panier.find(x => x.id === key);
+    const qty = qtys[key] || 1;
+    const minDate = new Date(); minDate.setDate(minDate.getDate() + (p.delai || 1));
+    return (
+      <div key={key} style={{
+        background:"#fff", border: inCart ? "1.5px solid #8B4513" : "1.5px solid #EDD5B3",
+        borderRadius:11, padding:12, display:"flex", flexDirection:"column", gap:7,
+        boxShadow:"0 1px 6px rgba(139,69,19,.06)", transition:"all .15s"
+      }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:6 }}>
+          <span style={{ fontWeight:700, fontSize:12, color:"#2C1810", lineHeight:1.3 }}>{p.nom}</span>
+          <span style={{ fontSize:10, padding:"2px 7px", borderRadius:20, background: p.prod==="La Pause"?"#E6F1FB":"#EAF3DE", color: p.prod==="La Pause"?"#0C447C":"#27500A", whiteSpace:"nowrap", flexShrink:0 }}>{p.prod}</span>
+        </div>
+        {p.desc && <div style={{ fontSize:10, color:"#9B7B5A", lineHeight:1.4 }}>{String(p.desc).substring(0,80)}{p.desc?.length>80?"...":""}</div>}
+        {p.allerg && (Array.isArray(p.allerg)?p.allerg:JSON.parse(p.allerg||"[]")).length > 0 && (
+          <div style={{ display:"flex", flexWrap:"wrap", gap:2 }}>
+            {(Array.isArray(p.allerg)?p.allerg:JSON.parse(p.allerg||"[]")).map(a => (
+              <span key={a} style={{ fontSize:9, padding:"1px 6px", background:"#FFF8E1", color:"#B8860B", borderRadius:20 }}>{a}</span>
+            ))}
+          </div>
+        )}
+        <div style={{ fontSize:10, color:"#9B7B5A" }}>Délai : J+{p.delai} — dispo dès le {minDate.toLocaleDateString("fr-FR")}</div>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginTop:2, gap:6 }}>
+          <div>
+            <div style={{ fontSize:12, fontWeight:700, color:"#8B4513" }}>{Number(p.pvente).toFixed(2)} € TTC</div>
+            <div style={{ fontSize:10, color:"#9B7B5A" }}>Achat : {Number(p.pachat).toFixed(2)} € HT / {p.unit}</div>
+          </div>
+          <div style={{ display:"flex", alignItems:"center", gap:5, flexShrink:0 }}>
+            {inCart ? (
+              <button onClick={() => setPanierWithSave(prev => prev.filter(x => x.id !== key))}
+                style={{ padding:"5px 10px", borderRadius:7, background:"#8B4513", color:"#fff", border:"none", cursor:"pointer", fontSize:11, fontWeight:700 }}>
+                ✓ ×{inCart.qty} — Retirer
+              </button>
+            ) : (
+              <>
+                <button onClick={() => setQtys(q => ({...q, [key]: Math.max(1,(q[key]||1)-1)}))}
+                  style={{ padding:"3px 8px", borderRadius:6, border:"1px solid #D4A96A", background:"#fff", cursor:"pointer", fontSize:14 }}>−</button>
+                <input type="number" value={qty} min="1" max="999"
+                  onChange={e => setQtys(q => ({...q, [key]: Math.max(1, parseInt(e.target.value)||1)}))}
+                  style={{ width:46, textAlign:"center", padding:"4px 4px", border:"1px solid #D4A96A", borderRadius:6, fontSize:13, fontWeight:600, color:"#2C1810", background:"#fffaf5" }}/>
+                <button onClick={() => setQtys(q => ({...q, [key]: (q[key]||1)+1}))}
+                  style={{ padding:"3px 8px", borderRadius:6, border:"1px solid #D4A96A", background:"#fff", cursor:"pointer", fontSize:14 }}>+</button>
+                <button onClick={() => { setPanierWithSave(prev => [...prev, {...p, id:key, qty}]); }}
+                  style={{ padding:"5px 10px", borderRadius:7, background:"linear-gradient(135deg,#C4874A,#8B4513)", color:"#fff", border:"none", cursor:"pointer", fontSize:11, fontWeight:700 }}>
+                  + Ajouter
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div style={{ padding:0 }}>
+      {/* Sous-onglets */}
+      <div style={{ display:"flex", borderBottom:"1px solid #EDD5B3", background:"#fff" }}>
+        {[
+          { id:"catalogue", label:"Catalogue" },
+          { id:"panier",    label:`Panier${panierCount>0?` (${panierCount})`:""}` },
+          { id:"historique",label:`Historique${isProducteur&&notifCount>0?` 🔴`:""}` },
+        ].map(t => (
+          <button key={t.id} onClick={() => setTabPat(t.id)}
+            style={{ padding:"10px 18px", border:"none", background:"none", cursor:"pointer", fontSize:12, fontWeight:700,
+              borderBottom: tabPat===t.id ? "3px solid #8B4513" : "3px solid transparent",
+              color: tabPat===t.id ? "#8B4513" : "#9B7B5A", fontFamily:"Georgia, serif" }}>
+            {t.label}
+          </button>
+        ))}
+        {canManageCatalogue && (
+          <button onClick={() => setShowModalArticle(true)}
+            style={{ marginLeft:"auto", margin:"6px 12px", padding:"5px 12px", borderRadius:8, border:"1.5px solid #8B4513",
+              background:"#8B4513", color:"#fff", cursor:"pointer", fontSize:11, fontWeight:700, fontFamily:"Georgia, serif" }}>
+            + Nouvel article
+          </button>
+        )}
+      </div>
+
+      {/* CATALOGUE */}
+      {tabPat==="catalogue" && (
+        <div style={{ padding:14 }}>
+          <div style={{ display:"flex", gap:8, marginBottom:12, flexWrap:"wrap", alignItems:"center" }}>
+            <div style={{ position:"relative", flex:1, minWidth:160 }}>
+              <span style={{ position:"absolute", left:10, top:"50%", transform:"translateY(-50%)", fontSize:13, pointerEvents:"none" }}>🔍</span>
+              <input value={filterText} onChange={e=>setFilterText(e.target.value)}
+                placeholder="Rechercher..."
+                style={{ width:"100%", padding:"7px 10px 7px 30px", border:"2px solid #D4A96A", borderRadius:8, background:"#fffaf5", fontSize:12, boxSizing:"border-box" }}/>
+            </div>
+            <select value={filterProd} onChange={e=>setFilterProd(e.target.value)}
+              style={{ padding:"7px 10px", border:"2px solid #D4A96A", borderRadius:8, background:"#fffaf5", fontSize:12, color:"#2C1810" }}>
+              <option value="">Tous les producteurs</option>
+              <option value="La Pause">La Pause</option>
+              <option value="La Ferrière">La Ferrière</option>
+            </select>
+          </div>
+          {loadingCat ? (
+            <div style={{ textAlign:"center", padding:40, color:"#9B7B5A" }}>Chargement du catalogue…</div>
+          ) : (
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(240px,1fr))", gap:10 }}>
+              {filtered.map(renderTuile)}
+              {/* Tuile commande exceptionnelle */}
+              {!isProducteur && (
+                <div style={{ border:"1.5px dashed #D4A96A", borderRadius:11, padding:12, background:"#fffaf5", display:"flex", flexDirection:"column", gap:8 }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
+                    <span style={{ fontWeight:700, fontSize:12, color:"#8B4513" }}>Commande exceptionnelle</span>
+                    <span style={{ fontSize:10, padding:"2px 7px", borderRadius:20, background:"#FAEEDA", color:"#633806" }}>Hors catalogue</span>
+                  </div>
+                  <div style={{ fontSize:11, color:"#9B7B5A", lineHeight:1.5 }}>Article personnalisé — gâteau sur mesure, décor spécial…</div>
+                  <div style={{ fontSize:10, color:"#9B7B5A" }}>Tarif communiqué ultérieurement par le producteur</div>
+                  <button onClick={() => setShowModalExcep(true)}
+                    style={{ padding:"6px 12px", borderRadius:7, border:"1.5px solid #D4A96A", background:"#fff", color:"#8B4513", cursor:"pointer", fontSize:11, fontWeight:700 }}>
+                    + Ajouter une demande exceptionnelle
+                  </button>
+                </div>
+              )}
+              {filtered.length === 0 && !loadingCat && (
+                <div style={{ color:"#9B7B5A", fontSize:13, padding:20, gridColumn:"1/-1" }}>Aucun article disponible.</div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* PANIER */}
+      {tabPat==="panier" && (
+        <div style={{ padding:14 }}>
+          <div style={{ background:"#fff", border:"1px solid #EDD5B3", borderRadius:11, padding:14 }}>
+            <div style={{ fontWeight:700, fontSize:13, color:"#2C1810", marginBottom:12 }}>Commande de pâtisserie</div>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:12 }}>
+              <div>
+                <div style={{ fontSize:11, color:"#9B7B5A", marginBottom:4 }}>Boulangerie</div>
+                <div style={{ padding:"7px 10px", border:"2px solid #D4A96A", borderRadius:8, background:"#fffaf5", fontSize:12, color:"#2C1810", fontWeight:600 }}>
+                  {boulangerieNom}
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize:11, color:"#9B7B5A", marginBottom:4 }}>Date de livraison souhaitée</div>
+                <input type="date" id="pat-date-livraison"
+                  style={{ padding:"7px 10px", border:"2px solid #D4A96A", borderRadius:8, background:"#fffaf5", fontSize:12, color:"#2C1810", width:"100%" }}/>
+              </div>
+            </div>
+            {panier.length === 0 ? (
+              <div style={{ textAlign:"center", padding:20, color:"#9B7B5A", fontSize:12 }}>Aucun article — ajoutez-en depuis le catalogue.</div>
+            ) : (
+              <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:12 }}>
+                {panier.map((p, i) => (
+                  <div key={i} style={{ display:"flex", alignItems:"center", gap:8, padding:8, background:"#FAF6F0", borderRadius:8 }}>
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <div style={{ fontSize:12, fontWeight:700, color:"#2C1810" }}>{p.nom}
+                        <span style={{ fontSize:10, padding:"2px 6px", borderRadius:20, marginLeft:6,
+                          background: p.excep?"#FAEEDA":p.prod==="La Pause"?"#E6F1FB":"#EAF3DE",
+                          color: p.excep?"#633806":p.prod==="La Pause"?"#0C447C":"#27500A" }}>
+                          {p.excep?"Exceptionnel":p.prod}
+                        </span>
+                      </div>
+                      {p.excep ? (
+                        <div style={{ fontSize:10, color:"#9B7B5A", fontStyle:"italic" }}>{p.desc}</div>
+                      ) : (
+                        <div style={{ fontSize:10, color:"#9B7B5A" }}>{Number(p.pachat).toFixed(2)} € HT / {p.unit}</div>
+                      )}
+                    </div>
+                    <div style={{ display:"flex", alignItems:"center", gap:4, flexShrink:0 }}>
+                      <span style={{ fontSize:12, color:"#9B7B5A" }}>×</span>
+                      <input type="number" value={p.qty} min="1"
+                        onChange={e => setPanierWithSave(prev => prev.map((x,j) => j===i ? {...x, qty:Math.max(1,parseInt(e.target.value)||1)} : x))}
+                        style={{ width:50, textAlign:"center", padding:"4px 5px", border:"1px solid #D4A96A", borderRadius:6, fontSize:13 }}/>
+                      {!p.excep && <span style={{ fontSize:12, fontWeight:700, color:"#8B4513", minWidth:52, textAlign:"right" }}>{(Number(p.pachat)*p.qty).toFixed(2)} €</span>}
+                      {p.excep && <span style={{ fontSize:11, color:"#9B7B5A", minWidth:52, textAlign:"right" }}>Sur devis</span>}
+                      <button onClick={() => setPanierWithSave(prev => prev.filter((_,j)=>j!==i))}
+                        style={{ background:"none", border:"none", cursor:"pointer", color:"#c0392b", fontSize:14, padding:"2px 4px" }}>✕</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div style={{ borderTop:"1px solid #EDD5B3", paddingTop:10, display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:8 }}>
+              <div style={{ fontSize:13, fontWeight:700, color:"#2C1810" }}>
+                Total : <span style={{ color:"#8B4513" }}>
+                  {panier.filter(p=>!p.excep).reduce((s,p)=>s+Number(p.pachat)*p.qty,0).toFixed(2)} €
+                  {panier.some(p=>p.excep) ? " + articles sur devis" : ""}
+                </span>
+              </div>
+              <button onClick={validerCommandePat} disabled={saving || panier.length===0}
+                style={{ padding:"8px 18px", borderRadius:8, border:"none", background:"#8B4513", color:"#fff", cursor:"pointer", fontSize:12, fontWeight:700, opacity: panier.length===0?0.5:1 }}>
+                {saving ? "Envoi…" : "Valider la commande"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* HISTORIQUE */}
+      {tabPat==="historique" && (
+        <div style={{ padding:14 }}>
+          {historique.length === 0 ? (
+            <div style={{ textAlign:"center", padding:40, color:"#9B7B5A" }}>Aucune commande.</div>
+          ) : historique.map(cmd => {
+            const pauseItems = cmd.items?.filter(i=>i.prod==="La Pause") || [];
+            const ferrItems  = cmd.items?.filter(i=>i.prod==="La Ferrière") || [];
+            const displayItems = isProducteur ? cmd.items?.filter(i=>i.prod===producteurNom) : cmd.items;
+            const canEdit = isModifiable(cmd);
+            const delaiR = getDelaiRestant(cmd);
+            const myStatus = producteurNom==="La Pause" ? cmd.statusPause : cmd.statusFerriere;
+            const s = [];
+            if (cmd.statusPause) s.push(cmd.statusPause);
+            if (cmd.statusFerriere) s.push(cmd.statusFerriere);
+            const statutGlobal = s.every(x=>x==="Livré")?"Livré":s.some(x=>x==="Livré")?"Partiellement livré":"En attente";
+            const statutColor = { "En attente":["#FFF8E1","#B8860B"], "Partiellement livré":["#E6F1FB","#0C447C"], "Livré":["#EAF3DE","#27500A"] };
+
+            return (
+              <div key={cmd.id} style={{ background:"#fff", border:"1px solid #EDD5B3", borderRadius:11, padding:14, marginBottom:10 }}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:8, flexWrap:"wrap", gap:6 }}>
+                  <div>
+                    <span style={{ fontSize:13, fontWeight:700, color:"#2C1810" }}>{cmd.id}</span>
+                    <span style={{ fontSize:11, color:"#9B7B5A", marginLeft:8 }}>
+                      {isProducteur ? cmd.boulangerie : ""} • Livraison le {cmd.dateLivraison}
+                    </span>
+                    {!isProducteur && canEdit && (
+                      <span style={{ fontSize:10, color:"#8B4513", marginLeft:6 }}>Modifiable encore {delaiR}j</span>
+                    )}
+                    {!isProducteur && !canEdit && statutGlobal!=="Livré" && (
+                      <span style={{ fontSize:10, color:"#9B7B5A", marginLeft:6 }}>Délai dépassé</span>
+                    )}
+                  </div>
+                  <div style={{ display:"flex", gap:6, alignItems:"center", flexWrap:"wrap" }}>
+                    {isProducteur ? (
+                      <>
+                        <span style={{ fontSize:11, padding:"2px 8px", borderRadius:20, background:statutColor[myStatus||"En attente"][0], color:statutColor[myStatus||"En attente"][1] }}>{myStatus}</span>
+                        {myStatus==="En attente" && (
+                          <button onClick={() => marquerLivrePatisserie(cmd.id, producteurNom)}
+                            style={{ padding:"4px 10px", borderRadius:7, border:"none", background:"#8B4513", color:"#fff", cursor:"pointer", fontSize:11, fontWeight:700 }}>
+                            Marquer comme livré
+                          </button>
+                        )}
+                        <button onClick={() => genererBLPat(cmd, producteurNom)}
+                          style={{ padding:"4px 10px", borderRadius:7, border:`1px solid ${producteurNom==="La Pause"?"#B5D4F4":"#C0DD97"}`, background: producteurNom==="La Pause"?"#E6F1FB":"#EAF3DE", color: producteurNom==="La Pause"?"#0C447C":"#27500A", cursor:"pointer", fontSize:11, fontWeight:700 }}>
+                          Éditer BL
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <span style={{ fontSize:11, padding:"2px 8px", borderRadius:20, background:statutColor[statutGlobal][0], color:statutColor[statutGlobal][1] }}>{statutGlobal}</span>
+                        {pauseItems.length>0 && <span style={{ fontSize:10, padding:"2px 7px", borderRadius:20, background:"#E6F1FB", color:"#0C447C" }}>La Pause : {cmd.statusPause}</span>}
+                        {ferrItems.length>0  && <span style={{ fontSize:10, padding:"2px 7px", borderRadius:20, background:"#EAF3DE", color:"#27500A" }}>La Ferrière : {cmd.statusFerriere}</span>}
+                        {canEdit && (
+                          <button onClick={() => { setModifCmd(cmd); setModifItems(cmd.items.map(i=>({...i}))); setShowModalModif(true); }}
+                            style={{ padding:"4px 10px", borderRadius:7, border:"1.5px solid #8B4513", background:"#fff", color:"#8B4513", cursor:"pointer", fontSize:11, fontWeight:700 }}>
+                            Modifier
+                          </button>
+                        )}
+                        {pauseItems.length>0 && <button onClick={() => genererBLPat(cmd,"La Pause")} style={{ padding:"4px 10px", borderRadius:7, border:"1px solid #B5D4F4", background:"#E6F1FB", color:"#0C447C", cursor:"pointer", fontSize:11, fontWeight:700 }}>BL La Pause</button>}
+                        {ferrItems.length>0  && <button onClick={() => genererBLPat(cmd,"La Ferrière")} style={{ padding:"4px 10px", borderRadius:7, border:"1px solid #C0DD97", background:"#EAF3DE", color:"#27500A", cursor:"pointer", fontSize:11, fontWeight:700 }}>BL La Ferrière</button>}
+                      </>
+                    )}
+                  </div>
+                </div>
+                <table style={{ width:"100%", fontSize:12, borderCollapse:"collapse" }}>
+                  {(displayItems||[]).map((it,i) => (
+                    <tr key={i}>
+                      <td style={{ padding:"3px 0", color:"#2C1810" }}>{it.nom}{it.excep&&<span style={{ fontSize:9, padding:"1px 5px", borderRadius:20, background:"#FAEEDA", color:"#633806", marginLeft:5 }}>Excep.</span>}</td>
+                      <td style={{ padding:"3px 6px" }}><span style={{ fontSize:10, padding:"2px 6px", borderRadius:20, background:it.excep?"#FAEEDA":it.prod==="La Pause"?"#E6F1FB":"#EAF3DE", color:it.excep?"#633806":it.prod==="La Pause"?"#0C447C":"#27500A" }}>{it.excep?"Hors cat.":it.prod}</span></td>
+                      <td style={{ textAlign:"right", color:"#9B7B5A" }}>×{it.qty}</td>
+                      <td style={{ textAlign:"right", fontWeight:700, color:"#2C1810" }}>{it.excep?"Sur devis":(Number(it.pachat)*it.qty).toFixed(2)+" €"}</td>
+                    </tr>
+                  ))}
+                  <tr>
+                    <td colSpan="3" style={{ paddingTop:6, borderTop:"1px solid #EDD5B3", fontWeight:700, color:"#9B7B5A" }}>Total</td>
+                    <td style={{ textAlign:"right", fontWeight:700, color:"#8B4513", borderTop:"1px solid #EDD5B3" }}>
+                      {(displayItems||[]).filter(i=>!i.excep).reduce((s,i)=>s+Number(i.pachat)*i.qty,0).toFixed(2)} €
+                      {(displayItems||[]).some(i=>i.excep)?" + devis":""}
+                    </td>
+                  </tr>
+                </table>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* MODAL NOUVEL ARTICLE */}
+      {showModalArticle && <ModalArticlePat onClose={()=>setShowModalArticle(false)} onSave={async (art)=>{
+        setSaving(true);
+        try {
+          const params = new URLSearchParams({ action:"saveArticlePat", article: JSON.stringify(art) });
+          await fetch(PAT_URL+"?"+params.toString(), { method:"GET", mode:"no-cors" });
+          await chargerCatalogue();
+        } catch(e){}
+        setSaving(false);
+        setShowModalArticle(false);
+      }} boulangerieId={boulangerieId} />}
+
+      {/* MODAL COMMANDE EXCEPTIONNELLE */}
+      {showModalExcep && <ModalExcepPat onClose={()=>setShowModalExcep(false)} onAdd={(item)=>{ setPanierWithSave(prev=>[...prev,item]); setShowModalExcep(false); }} />}
+
+      {/* MODAL MODIFIER COMMANDE */}
+      {showModalModif && modifCmd && (
+        <ModalModifPat
+          cmd={modifCmd}
+          items={modifItems}
+          setItems={setModifItems}
+          getDelaiRestant={getDelaiRestant}
+          onClose={()=>setShowModalModif(false)}
+          onSave={async()=>{
+            setSaving(true);
+            const updated = {...modifCmd, items: modifItems.filter(i=>i.qty>0)};
+            updated.total = updated.items.filter(i=>!i.excep).reduce((s,i)=>s+Number(i.pachat)*i.qty,0);
+            try {
+              const params = new URLSearchParams({ action:"updateCommandePat", commande: JSON.stringify(updated) });
+              await fetch(PAT_URL+"?"+params.toString(), { method:"GET", mode:"no-cors" });
+              await chargerHistoriquePatisserie();
+            } catch(e){}
+            setSaving(false);
+            setShowModalModif(false);
+          }}
+        />
+      )}
+    </div>
+  );
+
+  async function validerCommandePat() {
+    if (!panier.length) return;
+    const dateInput = document.getElementById("pat-date-livraison");
+    const d = dateInput?.value;
+    if (!d) { alert("Veuillez saisir une date de livraison."); return; }
+    setSaving(true);
+    const cmd = {
+      id: "PAT-" + Date.now(),
+      date: new Date().toLocaleDateString("fr-FR"),
+      dateLivraison: new Date(d).toLocaleDateString("fr-FR"),
+      dateLivraisonISO: d,
+      boulangerie: boulangerieNom,
+      boulangerieId,
+      items: panier,
+      total: panier.filter(p=>!p.excep).reduce((s,p)=>s+Number(p.pachat)*p.qty,0),
+      statusPause: panier.some(p=>p.prod==="La Pause") ? "En attente" : null,
+      statusFerriere: panier.some(p=>p.prod==="La Ferrière") ? "En attente" : null,
+    };
+    try {
+      const params = new URLSearchParams({ action:"saveCommandePat", commande: JSON.stringify(cmd) });
+      await fetch(PAT_URL+"?"+params.toString(), { method:"GET", mode:"no-cors" });
+      saveBrouillon([]);
+      setPanier([]);
+      setQtys({});
+      await chargerHistoriquePatisserie();
+      setTabPat("historique");
+    } catch(e) { alert("Erreur lors de l'envoi."); }
+    setSaving(false);
+  }
+
+  function marquerLivrePatisserie(cmdId, prod) {
+    setHistorique(prev => prev.map(c => {
+      if (c.id !== cmdId) return c;
+      const updated = {...c};
+      if (prod==="La Pause") updated.statusPause="Livré";
+      if (prod==="La Ferrière") updated.statusFerriere="Livré";
+      const params = new URLSearchParams({ action:"updateStatusPat", id:cmdId, prod, status:"Livré" });
+      fetch(PAT_URL+"?"+params.toString(), { method:"GET", mode:"no-cors" });
+      return updated;
+    }));
+  }
+
+  function genererBLPat(cmd, prod) {
+    const items = cmd.items?.filter(i=>i.prod===prod) || [];
+    const total = items.filter(i=>!i.excep).reduce((s,i)=>s+Number(i.pachat)*i.qty,0);
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ orientation:"portrait", unit:"mm", format:"a4" });
+    const W=210, m=18;
+    doc.setFillColor(139,69,19); doc.rect(0,0,W,28,\"F\");
+    doc.setTextColor(255,255,255); doc.setFontSize(16); doc.setFont("helvetica","bold");
+    doc.text("BON DE LIVRAISON — "+prod, m, 12);
+    doc.setFontSize(9); doc.setFont("helvetica","normal");
+    doc.text("BoulangCommande — Pense Au Pain", m, 20);
+    doc.setTextColor(44,24,16); doc.setFontSize(10);
+    let y=38;
+    doc.setFont("helvetica","bold"); doc.text("Commande :", m, y); doc.setFont("helvetica","normal"); doc.text(cmd.id, m+30, y); y+=6;
+    doc.setFont("helvetica","bold"); doc.text("Boulangerie :", m, y); doc.setFont("helvetica","normal"); doc.text(cmd.boulangerie, m+30, y); y+=6;
+    doc.setFont("helvetica","bold"); doc.text("Livraison :", m, y); doc.setFont("helvetica","normal"); doc.text(cmd.dateLivraison, m+30, y); y+=10;
+    doc.setFillColor(212,169,106); doc.rect(m,y,W-2*m,7,"F");
+    doc.setTextColor(255,255,255); doc.setFont("helvetica","bold"); doc.setFontSize(9);
+    doc.text("Article", m+2, y+5); doc.text("Qté", m+100, y+5); doc.text("Prix", m+130, y+5); y+=9;
+    doc.setTextColor(44,24,16); doc.setFont("helvetica","normal");
+    items.forEach(it => {
+      doc.text(String(it.nom).substring(0,45), m+2, y);
+      doc.text(String(it.qty), m+100, y);
+      doc.text(it.excep?"Sur devis":Number(it.pachat*it.qty).toFixed(2)+" €", m+130, y);
+      y+=6;
+    });
+    y+=4; doc.setDrawColor(212,169,106); doc.line(m,y,W-m,y); y+=6;
+    doc.setFont("helvetica","bold"); doc.text("TOTAL : "+total.toFixed(2)+" €"+(items.some(i=>i.excep)?" + devis":""), m, y);
+    doc.save("BL_"+prod.replace(/ /g,"_")+"_"+cmd.id+".pdf");
+  }
+}
+
+// ── Sous-composants modaux ───────────────────────────────────────────────────
+
+function ModalArticlePat({ onClose, onSave, boulangerieId }) {
+  const [form, setForm] = useState({ nom:"", prod:"La Pause", pvente:"", pachat:"", delai:"7", unit:"pièce", desc:"", allerg:[], visible: BOULANGERIES.map(b=>b.id) });
+  const allergens = ["Gluten","Oeufs","Lait","Fruits à coque","Soja","Arachides"];
+  const set = (k,v) => setForm(f=>({...f,[k]:v}));
+  return (
+    <div style={{ position:"fixed", top:0,left:0,right:0,bottom:0, background:"rgba(0,0,0,0.45)", display:"flex", alignItems:"flex-start", justifyContent:"center", paddingTop:30, zIndex:1000, overflowY:"auto" }}>
+      <div style={{ background:"#fff", borderRadius:14, border:"1px solid #EDD5B3", width:580, maxWidth:"95%", padding:22, maxHeight:"85vh", overflowY:"auto" }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+          <span style={{ fontSize:15, fontWeight:700, color:"#2C1810", fontFamily:"Georgia" }}>Nouvel article pâtisserie</span>
+          <button onClick={onClose} style={{ background:"none", border:"1px solid #D4A96A", borderRadius:6, cursor:"pointer", padding:"3px 9px", color:"#8B4513" }}>✕</button>
+        </div>
+        <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+            <div><label style={{ fontSize:11, color:"#9B7B5A", display:"block", marginBottom:3 }}>Nom</label>
+              <input value={form.nom} onChange={e=>set("nom",e.target.value)} placeholder="Ex: Tarte aux fraises"
+                style={{ width:"100%", padding:"7px 10px", border:"2px solid #D4A96A", borderRadius:8, background:"#fffaf5", fontSize:13, boxSizing:"border-box" }}/></div>
+            <div><label style={{ fontSize:11, color:"#9B7B5A", display:"block", marginBottom:3 }}>Producteur</label>
+              <select value={form.prod} onChange={e=>set("prod",e.target.value)}
+                style={{ width:"100%", padding:"7px 10px", border:"2px solid #D4A96A", borderRadius:8, background:"#fffaf5", fontSize:13 }}>
+                <option>La Pause</option><option>La Ferrière</option>
+              </select></div>
+          </div>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+            <div><label style={{ fontSize:11, color:"#9B7B5A", display:"block", marginBottom:3 }}>Prix vente conseillé (€ TTC)</label>
+              <input type="number" value={form.pvente} onChange={e=>set("pvente",e.target.value)} placeholder="0.00" step="0.01"
+                style={{ width:"100%", padding:"7px 10px", border:"2px solid #D4A96A", borderRadius:8, background:"#fffaf5", fontSize:13, boxSizing:"border-box" }}/></div>
+            <div><label style={{ fontSize:11, color:"#9B7B5A", display:"block", marginBottom:3 }}>Prix d'achat boulangerie (€ HT)</label>
+              <input type="number" value={form.pachat} onChange={e=>set("pachat",e.target.value)} placeholder="0.00" step="0.01"
+                style={{ width:"100%", padding:"7px 10px", border:"2px solid #D4A96A", borderRadius:8, background:"#fffaf5", fontSize:13, boxSizing:"border-box" }}/></div>
+          </div>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+            <div><label style={{ fontSize:11, color:"#9B7B5A", display:"block", marginBottom:3 }}>Délai minimum</label>
+              <select value={form.delai} onChange={e=>set("delai",e.target.value)}
+                style={{ width:"100%", padding:"7px 10px", border:"2px solid #D4A96A", borderRadius:8, background:"#fffaf5", fontSize:13 }}>
+                {["1","2","3","5","7","14"].map(d=><option key={d} value={d}>J+{d}</option>)}
+              </select></div>
+            <div><label style={{ fontSize:11, color:"#9B7B5A", display:"block", marginBottom:3 }}>Unité / conditionnement</label>
+              <input value={form.unit} onChange={e=>set("unit",e.target.value)} placeholder="pièce, kg, 6 pcs…"
+                style={{ width:"100%", padding:"7px 10px", border:"2px solid #D4A96A", borderRadius:8, background:"#fffaf5", fontSize:13, boxSizing:"border-box" }}/></div>
+          </div>
+          <div>
+            <label style={{ fontSize:11, color:"#9B7B5A", display:"block", marginBottom:5 }}>Visible pour les boulangeries</label>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:4, padding:10, background:"#FAF6F0", borderRadius:8 }}>
+              {BOULANGERIES.map(b => (
+                <label key={b.id} style={{ display:"flex", alignItems:"center", gap:6, fontSize:12, color:"#2C1810", cursor:"pointer" }}>
+                  <input type="checkbox" checked={form.visible.includes(b.id)}
+                    onChange={e=>set("visible", e.target.checked ? [...form.visible,b.id] : form.visible.filter(x=>x!==b.id))}
+                    style={{ cursor:"pointer" }}/> {b.name.replace("Pense Au Pain ","").replace("La Pause Cholet","La Pause Cholet")}
+                </label>
+              ))}
+            </div>
+          </div>
+          <div>
+            <label style={{ fontSize:11, color:"#9B7B5A", display:"block", marginBottom:5 }}>Allergènes</label>
+            <div style={{ display:"flex", flexWrap:"wrap", gap:4 }}>
+              {allergens.map(a=>(
+                <span key={a} onClick={()=>set("allerg", form.allerg.includes(a)?form.allerg.filter(x=>x!==a):[...form.allerg,a])}
+                  style={{ padding:"3px 10px", borderRadius:20, cursor:"pointer", fontSize:11, fontWeight:600,
+                    background: form.allerg.includes(a)?"#FFF8E1":"#FAF6F0",
+                    color: form.allerg.includes(a)?"#B8860B":"#9B7B5A",
+                    border: form.allerg.includes(a)?"1px solid #D4A96A":"1px solid #EDD5B3" }}>{a}</span>
+              ))}
+            </div>
+          </div>
+          <div>
+            <label style={{ fontSize:11, color:"#9B7B5A", display:"block", marginBottom:3 }}>Composition & description</label>
+            <textarea value={form.desc} onChange={e=>set("desc",e.target.value)}
+              placeholder="Ex: Pâte sablée, crème pâtissière, framboises fraîches…"
+              style={{ width:"100%", padding:"7px 10px", border:"2px solid #D4A96A", borderRadius:8, background:"#fffaf5", fontSize:13, minHeight:60, resize:"vertical", boxSizing:"border-box" }}/>
+          </div>
+          <div style={{ display:"flex", justifyContent:"flex-end", gap:8, marginTop:4 }}>
+            <button onClick={onClose} style={{ padding:"6px 14px", borderRadius:7, border:"1px solid #D4A96A", background:"#fff", color:"#8B4513", cursor:"pointer", fontSize:12 }}>Annuler</button>
+            <button onClick={()=>{ if(!form.nom.trim()){alert("Veuillez saisir un nom.");return;} onSave({...form, id:"pat-"+Date.now(), pvente:parseFloat(form.pvente)||0, pachat:parseFloat(form.pachat)||0, delai:parseInt(form.delai)||1}); }}
+              style={{ padding:"6px 14px", borderRadius:7, border:"none", background:"#8B4513", color:"#fff", cursor:"pointer", fontSize:12, fontWeight:700 }}>Enregistrer</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ModalExcepPat({ onClose, onAdd }) {
+  const [nom, setNom] = useState("");
+  const [prod, setProd] = useState("La Pause");
+  const [qty, setQty] = useState(1);
+  const [desc, setDesc] = useState("");
+  return (
+    <div style={{ position:"fixed", top:0,left:0,right:0,bottom:0, background:"rgba(0,0,0,0.45)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:1000 }}>
+      <div style={{ background:"#fff", borderRadius:14, border:"1px solid #EDD5B3", width:440, maxWidth:"95%", padding:22 }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:4 }}>
+          <span style={{ fontSize:15, fontWeight:700, color:"#2C1810", fontFamily:"Georgia" }}>Commande exceptionnelle</span>
+          <button onClick={onClose} style={{ background:"none", border:"1px solid #D4A96A", borderRadius:6, cursor:"pointer", padding:"3px 9px", color:"#8B4513" }}>✕</button>
+        </div>
+        <div style={{ fontSize:11, color:"#9B7B5A", marginBottom:14 }}>Article hors catalogue — sans tarif</div>
+        <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+          <div><label style={{ fontSize:11, color:"#9B7B5A", display:"block", marginBottom:3 }}>Nom de l'article</label>
+            <input value={nom} onChange={e=>setNom(e.target.value)} placeholder="Ex: Gâteau anniversaire personnalisé"
+              style={{ width:"100%", padding:"7px 10px", border:"2px solid #D4A96A", borderRadius:8, background:"#fffaf5", fontSize:13, boxSizing:"border-box" }}/></div>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+            <div><label style={{ fontSize:11, color:"#9B7B5A", display:"block", marginBottom:3 }}>Producteur</label>
+              <select value={prod} onChange={e=>setProd(e.target.value)}
+                style={{ width:"100%", padding:"7px 10px", border:"2px solid #D4A96A", borderRadius:8, background:"#fffaf5", fontSize:13 }}>
+                <option>La Pause</option><option>La Ferrière</option>
+              </select></div>
+            <div><label style={{ fontSize:11, color:"#9B7B5A", display:"block", marginBottom:3 }}>Quantité</label>
+              <input type="number" value={qty} min="1" onChange={e=>setQty(Math.max(1,parseInt(e.target.value)||1))}
+                style={{ width:"100%", padding:"7px 10px", border:"2px solid #D4A96A", borderRadius:8, background:"#fffaf5", fontSize:13, boxSizing:"border-box" }}/></div>
+          </div>
+          <div><label style={{ fontSize:11, color:"#9B7B5A", display:"block", marginBottom:3 }}>Description / instructions</label>
+            <textarea value={desc} onChange={e=>setDesc(e.target.value)}
+              placeholder="Ex: Gâteau 3 étages, décor floral, inscription 'Joyeux anniversaire'…"
+              style={{ width:"100%", padding:"7px 10px", border:"2px solid #D4A96A", borderRadius:8, background:"#fffaf5", fontSize:13, minHeight:80, resize:"vertical", boxSizing:"border-box" }}/></div>
+          <div style={{ padding:"8px 12px", background:"#FFF8E1", borderRadius:8, fontSize:11, color:"#B8860B" }}>
+            Le tarif sera communiqué ultérieurement par le producteur.
+          </div>
+          <div style={{ display:"flex", justifyContent:"flex-end", gap:8 }}>
+            <button onClick={onClose} style={{ padding:"6px 14px", borderRadius:7, border:"1px solid #D4A96A", background:"#fff", color:"#8B4513", cursor:"pointer", fontSize:12 }}>Annuler</button>
+            <button onClick={()=>{ if(!nom.trim()){alert("Veuillez saisir un nom.");return;} if(!desc.trim()){alert("Veuillez ajouter une description.");return;} onAdd({id:"excep-"+Date.now(),nom,prod,qty,desc,excep:true,delai:0,pachat:0,unit:"pièce"}); }}
+              style={{ padding:"6px 14px", borderRadius:7, border:"none", background:"#8B4513", color:"#fff", cursor:"pointer", fontSize:12, fontWeight:700 }}>Ajouter au panier</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ModalModifPat({ cmd, items, setItems, getDelaiRestant, onClose, onSave }) {
+  const delaiR = getDelaiRestant(cmd);
+  return (
+    <div style={{ position:"fixed", top:0,left:0,right:0,bottom:0, background:"rgba(0,0,0,0.45)", display:"flex", alignItems:"flex-start", justifyContent:"center", paddingTop:30, zIndex:1000, overflowY:"auto" }}>
+      <div style={{ background:"#fff", borderRadius:14, border:"1px solid #EDD5B3", width:540, maxWidth:"95%", padding:22 }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12 }}>
+          <span style={{ fontSize:15, fontWeight:700, color:"#2C1810", fontFamily:"Georgia" }}>Modifier {cmd.id}</span>
+          <button onClick={onClose} style={{ background:"none", border:"1px solid #D4A96A", borderRadius:6, cursor:"pointer", padding:"3px 9px", color:"#8B4513" }}>✕</button>
+        </div>
+        <div style={{ padding:"8px 12px", background:"#FAF6F0", borderRadius:8, fontSize:11, color:"#9B7B5A", marginBottom:12 }}>
+          Livraison le <strong>{cmd.dateLivraison}</strong> — délai de modification restant : <strong style={{ color:"#8B4513" }}>{delaiR} jour(s)</strong>
+        </div>
+        <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:12 }}>
+          {items.map((it,i)=>(
+            <div key={i} style={{ display:"flex", alignItems:"center", gap:8, padding:8, background:"#FAF6F0", borderRadius:8 }}>
+              <div style={{ flex:1, fontSize:12, fontWeight:600, color:"#2C1810" }}>
+                {it.nom}
+                <span style={{ fontSize:10, padding:"2px 6px", borderRadius:20, marginLeft:5, background:it.excep?"#FAEEDA":it.prod==="La Pause"?"#E6F1FB":"#EAF3DE", color:it.excep?"#633806":it.prod==="La Pause"?"#0C447C":"#27500A" }}>{it.excep?"Excep.":it.prod}</span>
+                {!it.excep && <div style={{ fontSize:10, color:"#9B7B5A" }}>Délai min J+{it.delai}</div>}
+              </div>
+              <div style={{ display:"flex", alignItems:"center", gap:4 }}>
+                <button onClick={()=>setItems(prev=>prev.map((x,j)=>j===i?{...x,qty:Math.max(0,x.qty-1)}:x))}
+                  style={{ padding:"3px 8px", borderRadius:6, border:"1px solid #D4A96A", background:"#fff", cursor:"pointer", fontSize:14 }}>−</button>
+                <input type="number" value={it.qty} min="0"
+                  onChange={e=>setItems(prev=>prev.map((x,j)=>j===i?{...x,qty:Math.max(0,parseInt(e.target.value)||0)}:x))}
+                  style={{ width:50, textAlign:"center", padding:"4px 5px", border:"1px solid #D4A96A", borderRadius:6, fontSize:13 }}/>
+                <button onClick={()=>setItems(prev=>prev.map((x,j)=>j===i?{...x,qty:x.qty+1}:x))}
+                  style={{ padding:"3px 8px", borderRadius:6, border:"1px solid #D4A96A", background:"#fff", cursor:"pointer", fontSize:14 }}>+</button>
+                <button onClick={()=>setItems(prev=>prev.filter((_,j)=>j!==i))}
+                  style={{ padding:"3px 9px", borderRadius:6, border:"1px solid #e24b4a", background:"#fff", color:"#e24b4a", cursor:"pointer", fontSize:11 }}>Supp.</button>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div style={{ fontSize:11, color:"#9B7B5A", marginBottom:12 }}>Quantité à 0 ou suppression = article retiré de la commande.</div>
+        <div style={{ display:"flex", justifyContent:"flex-end", gap:8, borderTop:"1px solid #EDD5B3", paddingTop:12 }}>
+          <button onClick={onClose} style={{ padding:"6px 14px", borderRadius:7, border:"1px solid #D4A96A", background:"#fff", color:"#8B4513", cursor:"pointer", fontSize:12 }}>Annuler</button>
+          <button onClick={onSave} style={{ padding:"6px 14px", borderRadius:7, border:"none", background:"#8B4513", color:"#fff", cursor:"pointer", fontSize:12, fontWeight:700 }}>Enregistrer</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
 // Pour changer un mot de passe, modifiez simplement la valeur "pwd" du compte concerné
 const COMPTES = [
   { pwd: "admin2025",   role: "admin",       boulangerieId: null, label: "Administrateur" },
@@ -2302,45 +2984,6 @@ export default function App() {
     } catch(e) { console.error("Erreur sauvegarde favoris", e); }
   };
 
-  // ── Brouillon panier ──
-  const [brouillon, setBrouillon] = useState(null); // brouillon chargé au login
-  const [brouillonSaving, setBrouillonSaving] = useState(false);
-
-  const sauvegarderBrouillon = async (newCart, boulId) => {
-    if (!boulId) return;
-    setBrouillonSaving(true);
-    try {
-      const params = new URLSearchParams({
-        action: "saveBrouillon",
-        boulangerieId: boulId,
-        cart: JSON.stringify(newCart)
-      });
-      await fetch(SHEETS_URL + "?" + params.toString(), { method: "GET", mode: "no-cors" });
-    } catch(e) { console.error("Erreur sauvegarde brouillon", e); }
-    setBrouillonSaving(false);
-  };
-
-  const chargerBrouillon = async (boulId) => {
-    if (!boulId) return;
-    try {
-      const res = await fetch(SHEETS_URL + `?action=getBrouillon&boulangerieId=${boulId}`);
-      const text = await res.text();
-      const data = JSON.parse(text);
-      if (data.success && Array.isArray(data.cart) && data.cart.length > 0) {
-        setBrouillon(data.cart);
-      }
-    } catch(e) { console.error("Erreur chargement brouillon", e); }
-  };
-
-  // Wrapper setCart qui sauvegarde automatiquement le brouillon
-  const setCartWithSave = (updater) => {
-    setCart(prev => {
-      const next = typeof updater === "function" ? updater(prev) : updater;
-      if (boulangerieId) sauvegarderBrouillon(next, boulangerieId);
-      return next;
-    });
-  };
-
   // ── Emballages ──
   const [emballages, setEmballages] = useState([]);
   const [cmdEmb, setCmdEmb] = useState([]);
@@ -2456,8 +3099,7 @@ export default function App() {
     chargerCommandes();
     chargerEmballages();
     chargerMercuriale();
-    chargerFavoris(compteChoisi.boulangerieId);
-    chargerBrouillon(compteChoisi.boulangerieId);
+    chargerFavoris(compte.boulangerieId || boulangerieId);
   };
 
   if (!compte) return <LoginScreen onLogin={handleLogin} />;
@@ -2468,9 +3110,6 @@ export default function App() {
     : history.filter(c => c.boulangerie === BOULANGERIES.find(b => b.id === compte.boulangerieId)?.name);
 
   const addToHistory = async (cmd) => {
-    // Effacer le brouillon quand la commande est validée
-    sauvegarderBrouillon([], boulangerieId);
-    setBrouillon(null);
     // Ajout immédiat en local
     setHistory(prev => [cmd, ...prev]);
     // Envoi vers Google Sheets via no-cors
@@ -2543,6 +3182,7 @@ export default function App() {
     { id: "dashboard",   label: "Tableau de bord",            icon: "📊" },
     { id: "commande",    label: "Commande matières premières", icon: "🌾" },
     { id: "emballages",  label: "Commande emballages",         icon: "📦" },
+    { id: "patisserie",  label: "Commande pâtisserie",         icon: "🍰" },
     { id: "historique",  label: "Historique",                  icon: "📋" },
   ];
 
@@ -2599,42 +3239,6 @@ export default function App() {
         </div>
       </div>
 
-      {/* Bannière brouillon */}
-      {brouillon && Array.isArray(brouillon) && brouillon.length > 0 && cart.length === 0 && (
-        <div style={{
-          background:"#FFF8E1", borderBottom:"2px solid #F5A623",
-          padding:"10px 20px", display:"flex", alignItems:"center",
-          justifyContent:"space-between", gap:12, flexWrap:"wrap"
-        }}>
-          <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-            <span style={{ fontSize:18 }}>🛒</span>
-            <span style={{ fontSize:12, fontWeight:700, color:"#7D5A00" }}>
-              Vous avez un panier en cours ({brouillon.length} article{brouillon.length > 1 ? "s" : ""})
-            </span>
-          </div>
-          <div style={{ display:"flex", gap:8 }}>
-            <button
-              onClick={() => { setCartWithSave(brouillon); setBrouillon(null); }}
-              style={{
-                padding:"6px 14px", borderRadius:7, border:"none",
-                background:"#F5A623", color:"#fff", fontWeight:700,
-                fontSize:12, cursor:"pointer", fontFamily:"Georgia, serif"
-              }}>
-              ↩ Reprendre le panier
-            </button>
-            <button
-              onClick={() => { sauvegarderBrouillon([], boulangerieId); setBrouillon(null); }}
-              style={{
-                padding:"6px 14px", borderRadius:7, border:"1px solid #ccc",
-                background:"#fff", color:"#999", fontWeight:600,
-                fontSize:12, cursor:"pointer", fontFamily:"Georgia, serif"
-              }}>
-              ✕ Ignorer
-            </button>
-          </div>
-        </div>
-      )}
-
       {/* Tabs */}
       <div className="pap-tabs" style={{ background:"#fff", display:"flex", borderBottom:"1px solid #E8D5B7" }}>
         {tabs.map(t => (
@@ -2665,8 +3269,9 @@ export default function App() {
       <div className="pap-content">
         <div className="pap-card-inner" style={{ background:"#fff", borderRadius:14, boxShadow:"0 2px 14px rgba(139,69,19,.07)", border:"1px solid #EDD5B3", minHeight:400 }}>
           {tab==="dashboard"   && <TabDashboard history={historyVisible} />}
-          {tab==="commande"    && <TabCommande cart={cart} setCart={setCartWithSave} boulangerieId={boulangerieId} addToHistory={addToHistory} produits={produits} setProduits={setProduits} favoris={favoris} toggleFavori={toggleFavori} />}
+          {tab==="commande"    && <TabCommande cart={cart} setCart={setCart} boulangerieId={boulangerieId} addToHistory={addToHistory} produits={produits} setProduits={setProduits} favoris={favoris} toggleFavori={toggleFavori} />}
           {tab==="emballages"  && <TabEmballages emballages={emballages} boulangerieId={boulangerieId} isAdmin={isAdmin} onAjouter={ajouterEmballage} onModifierStock={modifierStockEmb} onCommander={passerCommandeEmb} />}
+          {tab==="patisserie"  && <TabPatisserie boulangerieId={boulangerieId} compte={compte} isAdmin={isAdmin} />}
           {tab==="historique"  && <TabHistorique history={historyVisible} onUpdateStatus={updateStatus} onUpdateCommande={updateCommande} isAdmin={isAdmin} />}
         </div>
       </div>
