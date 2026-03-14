@@ -2341,9 +2341,9 @@ function TabPatisserie({ boulangerieId, compte, isAdmin }) {
       const updated = {...c};
       if (prod==="La Pause") updated.statusPause="Livré";
       if (prod==="La Ferrière") updated.statusFerriere="Livré";
-      await postToSheets(PAT_URL, { action: "updateStatusPat", id: cmdId, prod, status: "Livré" });
       return updated;
     }));
+    await postToSheets(PAT_URL, { action: "updateStatusPat", id: cmdId, prod, status: "Livré" });
   }
 
   function genererBLPat(cmd, prod) {
