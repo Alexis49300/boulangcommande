@@ -2986,41 +2986,6 @@ export default function App() {
     } catch(e) { console.error("Erreur sauvegarde favoris", e); }
   };
 
-  // ── Brouillon panier matières premières ──
-  const [brouillon, setBrouillon] = useState(null);
-
-  const sauvegarderBrouillon = async (newCart, boulId) => {
-    if (!boulId) return;
-    try {
-      const params = new URLSearchParams({
-        action: "saveBrouillon",
-        boulangerieId: boulId,
-        cart: JSON.stringify(newCart)
-      });
-      await fetch(SHEETS_URL + "?" + params.toString(), { method: "GET", mode: "no-cors" });
-    } catch(e) { console.error("Erreur sauvegarde brouillon", e); }
-  };
-
-  const chargerBrouillon = async (boulId) => {
-    if (!boulId) return;
-    try {
-      const res = await fetch(SHEETS_URL + `?action=getBrouillon&boulangerieId=${boulId}`);
-      const text = await res.text();
-      const data = JSON.parse(text);
-      if (data.success && Array.isArray(data.cart) && data.cart.length > 0) {
-        setBrouillon(data.cart);
-      }
-    } catch(e) { console.error("Erreur chargement brouillon", e); }
-  };
-
-  const setCartWithSave = (updater) => {
-    setCart(prev => {
-      const next = typeof updater === "function" ? updater(prev) : updater;
-      if (boulangerieId) sauvegarderBrouillon(next, boulangerieId);
-      return next;
-    });
-  };
-
   // ── Emballages ──
   const [emballages, setEmballages] = useState([]);
   const [cmdEmb, setCmdEmb] = useState([]);
@@ -3137,7 +3102,6 @@ export default function App() {
     chargerEmballages();
     chargerMercuriale();
     chargerFavoris(compteChoisi.boulangerieId);
-    chargerBrouillon(compteChoisi.boulangerieId);
   };
 
   if (!compte) return <LoginScreen onLogin={handleLogin} />;
@@ -3148,28 +3112,27 @@ export default function App() {
     : history.filter(c => c.boulangerie === BOULANGERIES.find(b => b.id === compte.boulangerieId)?.name);
 
   const addToHistory = async (cmd) => {
-    // Effacer le brouillon quand la commande est validée
-    sauvegarderBrouillon([], boulangerieId);
-    setBrouillon(null);
     // Ajout immédiat en local
     setHistory(prev => [cmd, ...prev]);
     // Envoi vers Google Sheets via no-cors
     setSyncing(true);
     setSyncError(false);
     try {
-      const params = new URLSearchParams({
-        id:          cmd.id,
-        date:        cmd.date,
-        boulangerie: cmd.boulangerie,
-        type:        cmd.type,
-        items:       cmd.items,
-        total:       cmd.total,
-        status:      cmd.status,
-        detail:      JSON.stringify(cmd.detail || [])
-      });
-      await fetch(SHEETS_URL + "?" + params.toString(), {
-        method: "GET",
-        mode: "no-cors"
+      await fetch(SHEETS_URL, {
+        method: "POST",
+        mode: "no-cors",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action:      "saveCommande",
+          id:          cmd.id,
+          date:        cmd.date,
+          boulangerie: cmd.boulangerie,
+          type:        cmd.type,
+          items:       cmd.items,
+          total:       cmd.total,
+          status:      cmd.status,
+          detail:      cmd.detail || []
+        })
       });
       setSyncing(false);
     } catch(e) {
@@ -3280,34 +3243,6 @@ export default function App() {
         </div>
       </div>
 
-      {/* Bannière brouillon */}
-      {brouillon && Array.isArray(brouillon) && brouillon.length > 0 && cart.length === 0 && (
-        <div style={{
-          background:"#FFF8E1", borderBottom:"2px solid #F5A623",
-          padding:"10px 20px", display:"flex", alignItems:"center",
-          justifyContent:"space-between", gap:12, flexWrap:"wrap"
-        }}>
-          <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-            <span style={{ fontSize:18 }}>🛒</span>
-            <span style={{ fontSize:12, fontWeight:700, color:"#7D5A00" }}>
-              Panier en cours ({brouillon.length} article{brouillon.length > 1 ? "s" : ""}) — reprendre votre commande ?
-            </span>
-          </div>
-          <div style={{ display:"flex", gap:8 }}>
-            <button
-              onClick={() => { setCartWithSave(brouillon); setBrouillon(null); }}
-              style={{ padding:"6px 14px", borderRadius:7, border:"none", background:"#F5A623", color:"#fff", fontWeight:700, fontSize:12, cursor:"pointer", fontFamily:"Georgia, serif" }}>
-              ↩ Reprendre le panier
-            </button>
-            <button
-              onClick={() => { sauvegarderBrouillon([], boulangerieId); setBrouillon(null); }}
-              style={{ padding:"6px 14px", borderRadius:7, border:"1px solid #ccc", background:"#fff", color:"#999", fontWeight:600, fontSize:12, cursor:"pointer", fontFamily:"Georgia, serif" }}>
-              ✕ Ignorer
-            </button>
-          </div>
-        </div>
-      )}
-
       {/* Tabs */}
       <div className="pap-tabs" style={{ background:"#fff", display:"flex", borderBottom:"1px solid #E8D5B7" }}>
         {tabs.map(t => (
@@ -3338,7 +3273,7 @@ export default function App() {
       <div className="pap-content">
         <div className="pap-card-inner" style={{ background:"#fff", borderRadius:14, boxShadow:"0 2px 14px rgba(139,69,19,.07)", border:"1px solid #EDD5B3", minHeight:400 }}>
           {tab==="dashboard"   && <TabDashboard history={historyVisible} />}
-          {tab==="commande"    && <TabCommande cart={cart} setCart={setCartWithSave} boulangerieId={boulangerieId} addToHistory={addToHistory} produits={produits} setProduits={setProduits} favoris={favoris} toggleFavori={toggleFavori} />}
+          {tab==="commande"    && <TabCommande cart={cart} setCart={setCart} boulangerieId={boulangerieId} addToHistory={addToHistory} produits={produits} setProduits={setProduits} favoris={favoris} toggleFavori={toggleFavori} />}
           {tab==="emballages"  && <TabEmballages emballages={emballages} boulangerieId={boulangerieId} isAdmin={isAdmin} onAjouter={ajouterEmballage} onModifierStock={modifierStockEmb} onCommander={passerCommandeEmb} />}
           {tab==="patisserie"  && <TabPatisserie boulangerieId={boulangerieId} compte={compte} isAdmin={isAdmin} />}
           {tab==="historique"  && <TabHistorique history={historyVisible} onUpdateStatus={updateStatus} onUpdateCommande={updateCommande} isAdmin={isAdmin} />}
