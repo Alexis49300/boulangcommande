@@ -2317,6 +2317,81 @@ function TabPatisserie({ boulangerieId, compte, isAdmin }) {
     );
   };
 
+
+  async function validerCommandePat() {
+    if (!panier.length) return;
+    const dateInput = document.getElementById("pat-date-livraison");
+    const d = dateInput?.value;
+    if (!d) { alert("Veuillez saisir une date de livraison."); return; }
+    setSaving(true);
+    const cmd = {
+      id: "PAT-" + Date.now(),
+      date: new Date().toLocaleDateString("fr-FR"),
+      dateLivraison: new Date(d).toLocaleDateString("fr-FR"),
+      dateLivraisonISO: d,
+      boulangerie: boulangerieNom,
+      boulangerieId,
+      items: panier,
+      total: panier.filter(p=>!p.excep).reduce((s,p)=>s+Number(p.pachat)*p.qty,0),
+      statusPause: panier.some(p=>p.prod==="La Pause") ? "En attente" : null,
+      statusFerriere: panier.some(p=>p.prod==="La Ferrière") ? "En attente" : null,
+    };
+    try {
+      const params = new URLSearchParams({ action:"saveCommandePat", commande: JSON.stringify(cmd) });
+      await fetch(PAT_URL+"?"+params.toString(), { method:"GET", mode:"no-cors" });
+      saveBrouillon([]);
+      setPanier([]);
+      setQtys({});
+      await chargerHistoriquePatisserie();
+      setTabPat("historique");
+    } catch(e) { alert("Erreur lors de l'envoi."); }
+    setSaving(false);
+  }
+
+  function marquerLivrePatisserie(cmdId, prod) {
+    setHistorique(prev => prev.map(c => {
+      if (c.id !== cmdId) return c;
+      const updated = {...c};
+      if (prod==="La Pause") updated.statusPause="Livré";
+      if (prod==="La Ferrière") updated.statusFerriere="Livré";
+      const params = new URLSearchParams({ action:"updateStatusPat", id:cmdId, prod, status:"Livré" });
+      fetch(PAT_URL+"?"+params.toString(), { method:"GET", mode:"no-cors" });
+      return updated;
+    }));
+  }
+
+  function genererBLPat(cmd, prod) {
+    const items = cmd.items?.filter(i=>i.prod===prod) || [];
+    const total = items.filter(i=>!i.excep).reduce((s,i)=>s+Number(i.pachat)*i.qty,0);
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ orientation:"portrait", unit:"mm", format:"a4" });
+    const W=210, m=18;
+    doc.setFillColor(139,69,19); doc.rect(0,0,W,28,"F");
+    doc.setTextColor(255,255,255); doc.setFontSize(16); doc.setFont("helvetica","bold");
+    doc.text("BON DE LIVRAISON — "+prod, m, 12);
+    doc.setFontSize(9); doc.setFont("helvetica","normal");
+    doc.text("BoulangCommande — Pense Au Pain", m, 20);
+    doc.setTextColor(44,24,16); doc.setFontSize(10);
+    let y=38;
+    doc.setFont("helvetica","bold"); doc.text("Commande :", m, y); doc.setFont("helvetica","normal"); doc.text(cmd.id, m+30, y); y+=6;
+    doc.setFont("helvetica","bold"); doc.text("Boulangerie :", m, y); doc.setFont("helvetica","normal"); doc.text(cmd.boulangerie, m+30, y); y+=6;
+    doc.setFont("helvetica","bold"); doc.text("Livraison :", m, y); doc.setFont("helvetica","normal"); doc.text(cmd.dateLivraison, m+30, y); y+=10;
+    doc.setFillColor(212,169,106); doc.rect(m,y,W-2*m,7,"F");
+    doc.setTextColor(255,255,255); doc.setFont("helvetica","bold"); doc.setFontSize(9);
+    doc.text("Article", m+2, y+5); doc.text("Qté", m+100, y+5); doc.text("Prix", m+130, y+5); y+=9;
+    doc.setTextColor(44,24,16); doc.setFont("helvetica","normal");
+    items.forEach(it => {
+      doc.text(String(it.nom).substring(0,45), m+2, y);
+      doc.text(String(it.qty), m+100, y);
+      doc.text(it.excep?"Sur devis":Number(it.pachat*it.qty).toFixed(2)+" €", m+130, y);
+      y+=6;
+    });
+    y+=4; doc.setDrawColor(212,169,106); doc.line(m,y,W-m,y); y+=6;
+    doc.setFont("helvetica","bold"); doc.text("TOTAL : "+total.toFixed(2)+" €"+(items.some(i=>i.excep)?" + devis":""), m, y);
+    doc.save("BL_"+prod.replace(/ /g,"_")+"_"+cmd.id+".pdf");
+  }
+
+
   return (
     <div style={{ padding:0 }}>
       {/* Sous-onglets */}
@@ -2580,701 +2655,6 @@ function TabPatisserie({ boulangerieId, compte, isAdmin }) {
           }}
         />
       )}
-    </div>
-  );
-
-  async function validerCommandePat() {
-    if (!panier.length) return;
-    const dateInput = document.getElementById("pat-date-livraison");
-    const d = dateInput?.value;
-    if (!d) { alert("Veuillez saisir une date de livraison."); return; }
-    setSaving(true);
-    const cmd = {
-      id: "PAT-" + Date.now(),
-      date: new Date().toLocaleDateString("fr-FR"),
-      dateLivraison: new Date(d).toLocaleDateString("fr-FR"),
-      dateLivraisonISO: d,
-      boulangerie: boulangerieNom,
-      boulangerieId,
-      items: panier,
-      total: panier.filter(p=>!p.excep).reduce((s,p)=>s+Number(p.pachat)*p.qty,0),
-      statusPause: panier.some(p=>p.prod==="La Pause") ? "En attente" : null,
-      statusFerriere: panier.some(p=>p.prod==="La Ferrière") ? "En attente" : null,
-    };
-    try {
-      const params = new URLSearchParams({ action:"saveCommandePat", commande: JSON.stringify(cmd) });
-      await fetch(PAT_URL+"?"+params.toString(), { method:"GET", mode:"no-cors" });
-      saveBrouillon([]);
-      setPanier([]);
-      setQtys({});
-      await chargerHistoriquePatisserie();
-      setTabPat("historique");
-    } catch(e) { alert("Erreur lors de l'envoi."); }
-    setSaving(false);
-  }
-
-  function marquerLivrePatisserie(cmdId, prod) {
-    setHistorique(prev => prev.map(c => {
-      if (c.id !== cmdId) return c;
-      const updated = {...c};
-      if (prod==="La Pause") updated.statusPause="Livré";
-      if (prod==="La Ferrière") updated.statusFerriere="Livré";
-      const params = new URLSearchParams({ action:"updateStatusPat", id:cmdId, prod, status:"Livré" });
-      fetch(PAT_URL+"?"+params.toString(), { method:"GET", mode:"no-cors" });
-      return updated;
-    }));
-  }
-
-  function genererBLPat(cmd, prod) {
-    const items = cmd.items?.filter(i=>i.prod===prod) || [];
-    const total = items.filter(i=>!i.excep).reduce((s,i)=>s+Number(i.pachat)*i.qty,0);
-    const { jsPDF } = window.jspdf;
-    const doc = new jsPDF({ orientation:"portrait", unit:"mm", format:"a4" });
-    const W=210, m=18;
-    doc.setFillColor(139,69,19); doc.rect(0,0,W,28,"F");
-    doc.setTextColor(255,255,255); doc.setFontSize(16); doc.setFont("helvetica","bold");
-    doc.text("BON DE LIVRAISON — "+prod, m, 12);
-    doc.setFontSize(9); doc.setFont("helvetica","normal");
-    doc.text("BoulangCommande — Pense Au Pain", m, 20);
-    doc.setTextColor(44,24,16); doc.setFontSize(10);
-    let y=38;
-    doc.setFont("helvetica","bold"); doc.text("Commande :", m, y); doc.setFont("helvetica","normal"); doc.text(cmd.id, m+30, y); y+=6;
-    doc.setFont("helvetica","bold"); doc.text("Boulangerie :", m, y); doc.setFont("helvetica","normal"); doc.text(cmd.boulangerie, m+30, y); y+=6;
-    doc.setFont("helvetica","bold"); doc.text("Livraison :", m, y); doc.setFont("helvetica","normal"); doc.text(cmd.dateLivraison, m+30, y); y+=10;
-    doc.setFillColor(212,169,106); doc.rect(m,y,W-2*m,7,"F");
-    doc.setTextColor(255,255,255); doc.setFont("helvetica","bold"); doc.setFontSize(9);
-    doc.text("Article", m+2, y+5); doc.text("Qté", m+100, y+5); doc.text("Prix", m+130, y+5); y+=9;
-    doc.setTextColor(44,24,16); doc.setFont("helvetica","normal");
-    items.forEach(it => {
-      doc.text(String(it.nom).substring(0,45), m+2, y);
-      doc.text(String(it.qty), m+100, y);
-      doc.text(it.excep?"Sur devis":Number(it.pachat*it.qty).toFixed(2)+" €", m+130, y);
-      y+=6;
-    });
-    y+=4; doc.setDrawColor(212,169,106); doc.line(m,y,W-m,y); y+=6;
-    doc.setFont("helvetica","bold"); doc.text("TOTAL : "+total.toFixed(2)+" €"+(items.some(i=>i.excep)?" + devis":""), m, y);
-    doc.save("BL_"+prod.replace(/ /g,"_")+"_"+cmd.id+".pdf");
-  }
-}
-
-// ── Sous-composants modaux ───────────────────────────────────────────────────
-
-function ModalArticlePat({ onClose, onSave, boulangerieId }) {
-  const [form, setForm] = useState({ nom:"", prod:"La Pause", pvente:"", pachat:"", delai:"7", unit:"pièce", desc:"", allerg:[], visible: BOULANGERIES.map(b=>b.id) });
-  const allergens = ["Gluten","Oeufs","Lait","Fruits à coque","Soja","Arachides"];
-  const set = (k,v) => setForm(f=>({...f,[k]:v}));
-  return (
-    <div style={{ position:"fixed", top:0,left:0,right:0,bottom:0, background:"rgba(0,0,0,0.45)", display:"flex", alignItems:"flex-start", justifyContent:"center", paddingTop:30, zIndex:1000, overflowY:"auto" }}>
-      <div style={{ background:"#fff", borderRadius:14, border:"1px solid #EDD5B3", width:580, maxWidth:"95%", padding:22, maxHeight:"85vh", overflowY:"auto" }}>
-        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
-          <span style={{ fontSize:15, fontWeight:700, color:"#2C1810", fontFamily:"Georgia" }}>Nouvel article pâtisserie</span>
-          <button onClick={onClose} style={{ background:"none", border:"1px solid #D4A96A", borderRadius:6, cursor:"pointer", padding:"3px 9px", color:"#8B4513" }}>✕</button>
-        </div>
-        <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
-            <div><label style={{ fontSize:11, color:"#9B7B5A", display:"block", marginBottom:3 }}>Nom</label>
-              <input value={form.nom} onChange={e=>set("nom",e.target.value)} placeholder="Ex: Tarte aux fraises"
-                style={{ width:"100%", padding:"7px 10px", border:"2px solid #D4A96A", borderRadius:8, background:"#fffaf5", fontSize:13, boxSizing:"border-box" }}/></div>
-            <div><label style={{ fontSize:11, color:"#9B7B5A", display:"block", marginBottom:3 }}>Producteur</label>
-              <select value={form.prod} onChange={e=>set("prod",e.target.value)}
-                style={{ width:"100%", padding:"7px 10px", border:"2px solid #D4A96A", borderRadius:8, background:"#fffaf5", fontSize:13 }}>
-                <option>La Pause</option><option>La Ferrière</option>
-              </select></div>
-          </div>
-          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
-            <div><label style={{ fontSize:11, color:"#9B7B5A", display:"block", marginBottom:3 }}>Prix vente conseillé (€ TTC)</label>
-              <input type="number" value={form.pvente} onChange={e=>set("pvente",e.target.value)} placeholder="0.00" step="0.01"
-                style={{ width:"100%", padding:"7px 10px", border:"2px solid #D4A96A", borderRadius:8, background:"#fffaf5", fontSize:13, boxSizing:"border-box" }}/></div>
-            <div><label style={{ fontSize:11, color:"#9B7B5A", display:"block", marginBottom:3 }}>Prix d'achat boulangerie (€ HT)</label>
-              <input type="number" value={form.pachat} onChange={e=>set("pachat",e.target.value)} placeholder="0.00" step="0.01"
-                style={{ width:"100%", padding:"7px 10px", border:"2px solid #D4A96A", borderRadius:8, background:"#fffaf5", fontSize:13, boxSizing:"border-box" }}/></div>
-          </div>
-          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
-            <div><label style={{ fontSize:11, color:"#9B7B5A", display:"block", marginBottom:3 }}>Délai minimum</label>
-              <select value={form.delai} onChange={e=>set("delai",e.target.value)}
-                style={{ width:"100%", padding:"7px 10px", border:"2px solid #D4A96A", borderRadius:8, background:"#fffaf5", fontSize:13 }}>
-                {["1","2","3","5","7","14"].map(d=><option key={d} value={d}>J+{d}</option>)}
-              </select></div>
-            <div><label style={{ fontSize:11, color:"#9B7B5A", display:"block", marginBottom:3 }}>Unité / conditionnement</label>
-              <input value={form.unit} onChange={e=>set("unit",e.target.value)} placeholder="pièce, kg, 6 pcs…"
-                style={{ width:"100%", padding:"7px 10px", border:"2px solid #D4A96A", borderRadius:8, background:"#fffaf5", fontSize:13, boxSizing:"border-box" }}/></div>
-          </div>
-          <div>
-            <label style={{ fontSize:11, color:"#9B7B5A", display:"block", marginBottom:5 }}>Visible pour les boulangeries</label>
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:4, padding:10, background:"#FAF6F0", borderRadius:8 }}>
-              {BOULANGERIES.map(b => (
-                <label key={b.id} style={{ display:"flex", alignItems:"center", gap:6, fontSize:12, color:"#2C1810", cursor:"pointer" }}>
-                  <input type="checkbox" checked={form.visible.includes(b.id)}
-                    onChange={e=>set("visible", e.target.checked ? [...form.visible,b.id] : form.visible.filter(x=>x!==b.id))}
-                    style={{ cursor:"pointer" }}/> {b.name.replace("Pense Au Pain ","").replace("La Pause Cholet","La Pause Cholet")}
-                </label>
-              ))}
-            </div>
-          </div>
-          <div>
-            <label style={{ fontSize:11, color:"#9B7B5A", display:"block", marginBottom:5 }}>Allergènes</label>
-            <div style={{ display:"flex", flexWrap:"wrap", gap:4 }}>
-              {allergens.map(a=>(
-                <span key={a} onClick={()=>set("allerg", form.allerg.includes(a)?form.allerg.filter(x=>x!==a):[...form.allerg,a])}
-                  style={{ padding:"3px 10px", borderRadius:20, cursor:"pointer", fontSize:11, fontWeight:600,
-                    background: form.allerg.includes(a)?"#FFF8E1":"#FAF6F0",
-                    color: form.allerg.includes(a)?"#B8860B":"#9B7B5A",
-                    border: form.allerg.includes(a)?"1px solid #D4A96A":"1px solid #EDD5B3" }}>{a}</span>
-              ))}
-            </div>
-          </div>
-          <div>
-            <label style={{ fontSize:11, color:"#9B7B5A", display:"block", marginBottom:3 }}>Composition & description</label>
-            <textarea value={form.desc} onChange={e=>set("desc",e.target.value)}
-              placeholder="Ex: Pâte sablée, crème pâtissière, framboises fraîches…"
-              style={{ width:"100%", padding:"7px 10px", border:"2px solid #D4A96A", borderRadius:8, background:"#fffaf5", fontSize:13, minHeight:60, resize:"vertical", boxSizing:"border-box" }}/>
-          </div>
-          <div style={{ display:"flex", justifyContent:"flex-end", gap:8, marginTop:4 }}>
-            <button onClick={onClose} style={{ padding:"6px 14px", borderRadius:7, border:"1px solid #D4A96A", background:"#fff", color:"#8B4513", cursor:"pointer", fontSize:12 }}>Annuler</button>
-            <button onClick={()=>{ if(!form.nom.trim()){alert("Veuillez saisir un nom.");return;} onSave({...form, id:"pat-"+Date.now(), pvente:parseFloat(form.pvente)||0, pachat:parseFloat(form.pachat)||0, delai:parseInt(form.delai)||1}); }}
-              style={{ padding:"6px 14px", borderRadius:7, border:"none", background:"#8B4513", color:"#fff", cursor:"pointer", fontSize:12, fontWeight:700 }}>Enregistrer</button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ModalExcepPat({ onClose, onAdd }) {
-  const [nom, setNom] = useState("");
-  const [prod, setProd] = useState("La Pause");
-  const [qty, setQty] = useState(1);
-  const [desc, setDesc] = useState("");
-  return (
-    <div style={{ position:"fixed", top:0,left:0,right:0,bottom:0, background:"rgba(0,0,0,0.45)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:1000 }}>
-      <div style={{ background:"#fff", borderRadius:14, border:"1px solid #EDD5B3", width:440, maxWidth:"95%", padding:22 }}>
-        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:4 }}>
-          <span style={{ fontSize:15, fontWeight:700, color:"#2C1810", fontFamily:"Georgia" }}>Commande exceptionnelle</span>
-          <button onClick={onClose} style={{ background:"none", border:"1px solid #D4A96A", borderRadius:6, cursor:"pointer", padding:"3px 9px", color:"#8B4513" }}>✕</button>
-        </div>
-        <div style={{ fontSize:11, color:"#9B7B5A", marginBottom:14 }}>Article hors catalogue — sans tarif</div>
-        <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-          <div><label style={{ fontSize:11, color:"#9B7B5A", display:"block", marginBottom:3 }}>Nom de l'article</label>
-            <input value={nom} onChange={e=>setNom(e.target.value)} placeholder="Ex: Gâteau anniversaire personnalisé"
-              style={{ width:"100%", padding:"7px 10px", border:"2px solid #D4A96A", borderRadius:8, background:"#fffaf5", fontSize:13, boxSizing:"border-box" }}/></div>
-          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
-            <div><label style={{ fontSize:11, color:"#9B7B5A", display:"block", marginBottom:3 }}>Producteur</label>
-              <select value={prod} onChange={e=>setProd(e.target.value)}
-                style={{ width:"100%", padding:"7px 10px", border:"2px solid #D4A96A", borderRadius:8, background:"#fffaf5", fontSize:13 }}>
-                <option>La Pause</option><option>La Ferrière</option>
-              </select></div>
-            <div><label style={{ fontSize:11, color:"#9B7B5A", display:"block", marginBottom:3 }}>Quantité</label>
-              <input type="number" value={qty} min="1" onChange={e=>setQty(Math.max(1,parseInt(e.target.value)||1))}
-                style={{ width:"100%", padding:"7px 10px", border:"2px solid #D4A96A", borderRadius:8, background:"#fffaf5", fontSize:13, boxSizing:"border-box" }}/></div>
-          </div>
-          <div><label style={{ fontSize:11, color:"#9B7B5A", display:"block", marginBottom:3 }}>Description / instructions</label>
-            <textarea value={desc} onChange={e=>setDesc(e.target.value)}
-              placeholder="Ex: Gâteau 3 étages, décor floral, inscription 'Joyeux anniversaire'…"
-              style={{ width:"100%", padding:"7px 10px", border:"2px solid #D4A96A", borderRadius:8, background:"#fffaf5", fontSize:13, minHeight:80, resize:"vertical", boxSizing:"border-box" }}/></div>
-          <div style={{ padding:"8px 12px", background:"#FFF8E1", borderRadius:8, fontSize:11, color:"#B8860B" }}>
-            Le tarif sera communiqué ultérieurement par le producteur.
-          </div>
-          <div style={{ display:"flex", justifyContent:"flex-end", gap:8 }}>
-            <button onClick={onClose} style={{ padding:"6px 14px", borderRadius:7, border:"1px solid #D4A96A", background:"#fff", color:"#8B4513", cursor:"pointer", fontSize:12 }}>Annuler</button>
-            <button onClick={()=>{ if(!nom.trim()){alert("Veuillez saisir un nom.");return;} if(!desc.trim()){alert("Veuillez ajouter une description.");return;} onAdd({id:"excep-"+Date.now(),nom,prod,qty,desc,excep:true,delai:0,pachat:0,unit:"pièce"}); }}
-              style={{ padding:"6px 14px", borderRadius:7, border:"none", background:"#8B4513", color:"#fff", cursor:"pointer", fontSize:12, fontWeight:700 }}>Ajouter au panier</button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ModalModifPat({ cmd, items, setItems, getDelaiRestant, onClose, onSave }) {
-  const delaiR = getDelaiRestant(cmd);
-  return (
-    <div style={{ position:"fixed", top:0,left:0,right:0,bottom:0, background:"rgba(0,0,0,0.45)", display:"flex", alignItems:"flex-start", justifyContent:"center", paddingTop:30, zIndex:1000, overflowY:"auto" }}>
-      <div style={{ background:"#fff", borderRadius:14, border:"1px solid #EDD5B3", width:540, maxWidth:"95%", padding:22 }}>
-        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12 }}>
-          <span style={{ fontSize:15, fontWeight:700, color:"#2C1810", fontFamily:"Georgia" }}>Modifier {cmd.id}</span>
-          <button onClick={onClose} style={{ background:"none", border:"1px solid #D4A96A", borderRadius:6, cursor:"pointer", padding:"3px 9px", color:"#8B4513" }}>✕</button>
-        </div>
-        <div style={{ padding:"8px 12px", background:"#FAF6F0", borderRadius:8, fontSize:11, color:"#9B7B5A", marginBottom:12 }}>
-          Livraison le <strong>{cmd.dateLivraison}</strong> — délai de modification restant : <strong style={{ color:"#8B4513" }}>{delaiR} jour(s)</strong>
-        </div>
-        <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:12 }}>
-          {items.map((it,i)=>(
-            <div key={i} style={{ display:"flex", alignItems:"center", gap:8, padding:8, background:"#FAF6F0", borderRadius:8 }}>
-              <div style={{ flex:1, fontSize:12, fontWeight:600, color:"#2C1810" }}>
-                {it.nom}
-                <span style={{ fontSize:10, padding:"2px 6px", borderRadius:20, marginLeft:5, background:it.excep?"#FAEEDA":it.prod==="La Pause"?"#E6F1FB":"#EAF3DE", color:it.excep?"#633806":it.prod==="La Pause"?"#0C447C":"#27500A" }}>{it.excep?"Excep.":it.prod}</span>
-                {!it.excep && <div style={{ fontSize:10, color:"#9B7B5A" }}>Délai min J+{it.delai}</div>}
-              </div>
-              <div style={{ display:"flex", alignItems:"center", gap:4 }}>
-                <button onClick={()=>setItems(prev=>prev.map((x,j)=>j===i?{...x,qty:Math.max(0,x.qty-1)}:x))}
-                  style={{ padding:"3px 8px", borderRadius:6, border:"1px solid #D4A96A", background:"#fff", cursor:"pointer", fontSize:14 }}>−</button>
-                <input type="number" value={it.qty} min="0"
-                  onChange={e=>setItems(prev=>prev.map((x,j)=>j===i?{...x,qty:Math.max(0,parseInt(e.target.value)||0)}:x))}
-                  style={{ width:50, textAlign:"center", padding:"4px 5px", border:"1px solid #D4A96A", borderRadius:6, fontSize:13 }}/>
-                <button onClick={()=>setItems(prev=>prev.map((x,j)=>j===i?{...x,qty:x.qty+1}:x))}
-                  style={{ padding:"3px 8px", borderRadius:6, border:"1px solid #D4A96A", background:"#fff", cursor:"pointer", fontSize:14 }}>+</button>
-                <button onClick={()=>setItems(prev=>prev.filter((_,j)=>j!==i))}
-                  style={{ padding:"3px 9px", borderRadius:6, border:"1px solid #e24b4a", background:"#fff", color:"#e24b4a", cursor:"pointer", fontSize:11 }}>Supp.</button>
-              </div>
-            </div>
-          ))}
-        </div>
-        <div style={{ fontSize:11, color:"#9B7B5A", marginBottom:12 }}>Quantité à 0 ou suppression = article retiré de la commande.</div>
-        <div style={{ display:"flex", justifyContent:"flex-end", gap:8, borderTop:"1px solid #EDD5B3", paddingTop:12 }}>
-          <button onClick={onClose} style={{ padding:"6px 14px", borderRadius:7, border:"1px solid #D4A96A", background:"#fff", color:"#8B4513", cursor:"pointer", fontSize:12 }}>Annuler</button>
-          <button onClick={onSave} style={{ padding:"6px 14px", borderRadius:7, border:"none", background:"#8B4513", color:"#fff", cursor:"pointer", fontSize:12, fontWeight:700 }}>Enregistrer</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-
-// Pour changer un mot de passe, modifiez simplement la valeur "pwd" du compte concerné
-const COMPTES = [
-  { pwd: "admin2025",   role: "admin",       boulangerieId: null, label: "Administrateur" },
-  { pwd: "cholet1",     role: "boutique",    boulangerieId: 1,    label: "Cholet Boulange" },
-  { pwd: "sacrecoeur1", role: "boutique",    boulangerieId: 2,    label: "Cholet Sacré Coeur" },
-  { pwd: "jard1",       role: "boutique",    boulangerieId: 3,    label: "Jard" },
-  { pwd: "ferriere1",   role: "boutique",    boulangerieId: 4,    label: "La Ferrière" },
-  { pwd: "pause1",      role: "boutique",    boulangerieId: 5,    label: "La Pause Cholet" },
-];
-
-function LoginScreen({ onLogin }) {
-  const [pwd, setPwd] = useState("");
-  const [erreur, setErreur] = useState(false);
-  const [visible, setVisible] = useState(false);
-
-  const handleSubmit = () => {
-    const compte = COMPTES.find(c => c.pwd === pwd);
-    if (compte) {
-      onLogin(compte);
-    } else {
-      setErreur(true);
-      setPwd("");
-      setTimeout(() => setErreur(false), 2500);
-    }
-  };
-
-  return (
-    <div style={{
-      minHeight: "100vh", background: "#FAF6F0",
-      display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-      fontFamily: "'Calibri', Georgia, serif"
-    }}>
-      <div style={{
-        background: "#fff", borderRadius: 20, padding: "40px 44px",
-        boxShadow: "0 8px 40px rgba(139,69,19,.13)", border: "2px solid #D4A96A",
-        width: 360, maxWidth: "90vw", textAlign: "center"
-      }}>
-        <img src="Pense_au_pain_mise_en_page.png" alt="Pense Au Pain"
-          style={{ height: 90, width: 90, objectFit: "contain", marginBottom: 16 }} />
-        <h1 style={{ margin: "0 0 4px", color: "#2C1810", fontFamily: "Georgia", fontSize: 20, fontWeight: 800 }}>
-          BoulangCommande
-        </h1>
-        <p style={{ margin: "0 0 28px", color: "#9B7B5A", fontSize: 11, letterSpacing: 2 }}>
-          PENSE AU PAIN — ACCÈS SÉCURISÉ
-        </p>
-
-        <div style={{ position: "relative", marginBottom: 14 }}>
-          <input
-            type={visible ? "text" : "password"}
-            value={pwd}
-            onChange={e => { setPwd(e.target.value); setErreur(false); }}
-            onKeyDown={e => e.key === "Enter" && handleSubmit()}
-            placeholder="Mot de passe"
-            autoFocus
-            style={{
-              width: "100%", padding: "12px 44px 12px 16px",
-              border: `2px solid ${erreur ? "#e74c3c" : "#D4A96A"}`,
-              borderRadius: 10, background: erreur ? "#fff5f5" : "#fffaf5",
-              fontSize: 14, color: "#2C1810", outline: "none",
-              boxSizing: "border-box", fontFamily: "Calibri, sans-serif",
-              transition: "border-color .2s, background .2s"
-            }}
-          />
-          <button onClick={() => setVisible(v => !v)}
-            style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", fontSize: 16, color: "#9B7B5A" }}>
-            {visible ? "🙈" : "👁"}
-          </button>
-        </div>
-
-        {erreur && (
-          <p style={{ margin: "0 0 12px", color: "#e74c3c", fontSize: 12, fontWeight: 600 }}>
-            ⚠ Mot de passe incorrect
-          </p>
-        )}
-
-        <button onClick={handleSubmit}
-          style={{
-            width: "100%", padding: "12px 0",
-            background: "linear-gradient(135deg, #8B4513, #6B3210)",
-            color: "#fff", border: "none", borderRadius: 10,
-            fontWeight: 700, fontSize: 14, fontFamily: "Georgia, serif",
-            cursor: "pointer", boxShadow: "0 4px 14px rgba(139,69,19,.35)", transition: "opacity .15s"
-          }}
-          onMouseEnter={e => e.currentTarget.style.opacity = ".88"}
-          onMouseLeave={e => e.currentTarget.style.opacity = "1"}
-        >
-          Accéder →
-        </button>
-
-        <p style={{ margin: "20px 0 0", fontSize: 10, color: "#C4A882" }}>
-          Accès réservé aux équipes Pense Au Pain
-        </p>
-      </div>
-    </div>
-  );
-}
-
-const SHEETS_URL = "https://script.google.com/macros/s/AKfycbxx2jIIJon7gjoOD3HZNKJfPvCxy7BAIq3oqRZcW3F-kof8hO4F5baU9J00jnk23cvqxA/exec";
-const EMB_URL    = "https://script.google.com/macros/s/AKfycbwIv4kiUS6P8yRYQC8_smlo92e4mZqdo641ytEzRWjeZFyb-PRdgUphHF88s9Cwlaa3/exec";
-
-export default function App() {
-  const [compte, setCompte] = useState(null); // null = non connecté
-  const [tab, setTab] = useState("commande");
-  const [cart, setCart] = useState([]);
-  const [boulangerieId, setBoulangerieId] = useState(null);
-  const [history, setHistory] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [syncing, setSyncing] = useState(false);
-  const [syncError, setSyncError] = useState(false);
-
-  // ── Mercuriale ──
-  const [produits, setProduits] = useState(ALL_PRODUCTS);
-
-  const chargerMercuriale = async () => {
-    try {
-      const res = await fetch(SHEETS_URL + "?action=getMercuriale");
-      const text = await res.text();
-      const data = JSON.parse(text);
-      if (data.success && data.produits && data.produits.length > 0) {
-        setProduits(data.produits);
-      }
-    } catch(e) { console.error("Erreur chargement mercuriale", e); }
-  };
-
-  // ── Favoris ──
-  const [favoris, setFavoris] = useState([]);
-
-  const chargerFavoris = async (boulId) => {
-    if (!boulId) return;
-    try {
-      const res = await fetch(SHEETS_URL + `?action=getFavoris&boulangerieId=${boulId}`);
-      const text = await res.text();
-      const data = JSON.parse(text);
-      if (data.success) setFavoris(data.favoris || []);
-    } catch(e) { console.error("Erreur chargement favoris", e); }
-  };
-
-  const toggleFavori = async (key) => {
-    const boulId = boulangerieId;
-    if (!boulId) return;
-    const nouveaux = favoris.includes(key)
-      ? favoris.filter(f => f !== key)
-      : [...favoris, key];
-    setFavoris(nouveaux);
-    try {
-      const params = new URLSearchParams({
-        action: "saveFavoris",
-        boulangerieId: boulId,
-        favoris: JSON.stringify(nouveaux)
-      });
-      await fetch(SHEETS_URL + "?" + params.toString(), { method:"GET", mode:"no-cors" });
-    } catch(e) { console.error("Erreur sauvegarde favoris", e); }
-  };
-
-  // ── Emballages ──
-  const [emballages, setEmballages] = useState([]);
-  const [cmdEmb, setCmdEmb] = useState([]);
-  const [historyEmb, setHistoryEmb] = useState([]);
-
-  const chargerEmballages = async () => {
-    try {
-      const res = await fetch(EMB_URL + "?action=getCatalogue");
-      const text = await res.text();
-      const data = JSON.parse(text);
-      if (data.success) setEmballages(data.catalogue || []);
-      const res2 = await fetch(EMB_URL + "?action=getCommandes");
-      const text2 = await res2.text();
-      const data2 = JSON.parse(text2);
-      if (data2.success) {
-        const cmdsEmb = (data2.commandes || []).filter(c => c.id).map(c => ({ ...c, type: "Emballages" })).reverse();
-        setHistoryEmb(cmdsEmb);
-        // Fusionner avec l'historique principal (les EMB qui n'y sont pas déjà)
-        setHistory(prev => {
-          const ids = new Set(prev.map(c => c.id));
-          const nouvelles = cmdsEmb.filter(c => !ids.has(c.id));
-          return [...nouvelles, ...prev].sort((a,b) => b.date.localeCompare(a.date));
-        });
-      }
-    } catch(e) { console.error("Erreur chargement emballages", e); }
-  };
-
-  const ajouterEmballage = async (emb) => {
-    setEmballages(prev => [...prev, emb]);
-    try {
-      const params = new URLSearchParams({ action:"addEmballage", ...emb });
-      await fetch(EMB_URL + "?" + params.toString(), { method:"GET", mode:"no-cors" });
-    } catch(e) { console.error(e); }
-  };
-
-  const modifierStockEmb = async (ref, newStock) => {
-    setEmballages(prev => prev.map(e => e.ref === ref ? { ...e, stock: newStock } : e));
-    try {
-      const params = new URLSearchParams({ action:"updateStock", ref, stock: newStock });
-      await fetch(EMB_URL + "?" + params.toString(), { method:"GET", mode:"no-cors" });
-    } catch(e) { console.error(e); }
-  };
-
-  const passerCommandeEmb = async (cmd) => {
-    // Décrémenter le stock localement
-    const detail = typeof cmd.detail === "string" ? JSON.parse(cmd.detail) : cmd.detail;
-    setEmballages(prev => prev.map(e => {
-      const ligne = detail.find(i => i.ref === e.ref);
-      if (!ligne) return e;
-      const unites = ligne.qty * (parseInt(ligne.unit) || 1);
-      return { ...e, stock: Math.max(0, (Number(e.stock) || 0) - unites) };
-    }));
-    // Ajouter à l'historique emballages ET à l'historique principal
-    setHistoryEmb(prev => [cmd, ...prev]);
-    setHistory(prev => [cmd, ...prev]);
-    // Sync Google Sheets principal (même endpoint que les matières premières)
-    setSyncing(true);
-    setSyncError(false);
-    try {
-      const params = new URLSearchParams({
-        id: cmd.id, date: cmd.date, boulangerie: cmd.boulangerie,
-        type: "Emballages",
-        items: cmd.items, total: cmd.total, status: cmd.status,
-        detail: JSON.stringify(detail)
-      });
-      await fetch(SHEETS_URL + "?" + params.toString(), { method:"GET", mode:"no-cors" });
-      setSyncing(false);
-    } catch(e) { setSyncError(true); setSyncing(false); console.error(e); }
-    // Sync Google Sheets emballages
-    try {
-      const params2 = new URLSearchParams({
-        action: "addCommande",
-        id: cmd.id, date: cmd.date, boulangerie: cmd.boulangerie,
-        items: cmd.items, total: cmd.total, status: cmd.status,
-        detail: JSON.stringify(detail)
-      });
-      await fetch(EMB_URL + "?" + params2.toString(), { method:"GET", mode:"no-cors" });
-      // Mettre à jour les stocks dans le sheet
-      for (const ligne of detail) {
-        const emb = emballages.find(e => e.ref === ligne.ref);
-        if (emb) {
-          const unites = ligne.qty * (parseInt(ligne.unit) || 1);
-          const newStock = Math.max(0, (Number(emb.stock) || 0) - unites);
-          const sp = new URLSearchParams({ action:"updateStock", ref: ligne.ref, stock: newStock });
-          await fetch(EMB_URL + "?" + sp.toString(), { method:"GET", mode:"no-cors" });
-        }
-      }
-    } catch(e) { console.error(e); }
-  };
-
-  const isAdmin = compte?.role === "admin";
-
-  // Charger les commandes depuis Google Sheets au login
-  const chargerCommandes = async () => {
-    setLoading(true);
-    try {
-      const res = await fetch(SHEETS_URL + "?action=get");
-      const text = await res.text();
-      const data = JSON.parse(text);
-      if (data.success && data.commandes) {
-        const all = data.commandes.filter(c => c.id).reverse();
-        setHistory(all);
-      }
-    } catch(e) {
-      console.error("Erreur chargement commandes", e);
-    }
-    setLoading(false);
-  };
-
-  const handleLogin = (compteChoisi) => {
-    setCompte(compteChoisi);
-    if (compteChoisi.boulangerieId) setBoulangerieId(compteChoisi.boulangerieId);
-    chargerCommandes();
-    chargerEmballages();
-    chargerMercuriale();
-    chargerFavoris(compte.boulangerieId || boulangerieId);
-  };
-
-  if (!compte) return <LoginScreen onLogin={handleLogin} />;
-
-  // Historique filtré selon le rôle
-  const historyVisible = isAdmin
-    ? history
-    : history.filter(c => c.boulangerie === BOULANGERIES.find(b => b.id === compte.boulangerieId)?.name);
-
-  const addToHistory = async (cmd) => {
-    // Ajout immédiat en local
-    setHistory(prev => [cmd, ...prev]);
-    // Envoi vers Google Sheets via no-cors
-    setSyncing(true);
-    setSyncError(false);
-    try {
-      const params = new URLSearchParams({
-        id:          cmd.id,
-        date:        cmd.date,
-        boulangerie: cmd.boulangerie,
-        type:        cmd.type,
-        items:       cmd.items,
-        total:       cmd.total,
-        status:      cmd.status,
-        detail:      JSON.stringify(cmd.detail || [])
-      });
-      await fetch(SHEETS_URL + "?" + params.toString(), {
-        method: "GET",
-        mode: "no-cors"
-      });
-      setSyncing(false);
-    } catch(e) {
-      setSyncError(true);
-      setSyncing(false);
-      console.error("Erreur sync Google Sheets", e);
-    }
-  };
-
-  const updateStatus = async (id, newStatus) => {
-    setHistory(prev => prev.map(c => c.id === id ? { ...c, status: newStatus } : c));
-    // Mettre à jour aussi dans historyEmb si c'est une commande emballages
-    if (id.startsWith("EMB-")) {
-      setHistoryEmb(prev => prev.map(c => c.id === id ? { ...c, status: newStatus } : c));
-      try {
-        const params = new URLSearchParams({ action: "updateStatus", id, status: newStatus });
-        await fetch(EMB_URL + "?" + params.toString(), { method: "GET", mode: "no-cors" });
-      } catch(e) { console.error("Erreur mise à jour statut EMB", e); }
-    }
-    try {
-      const params = new URLSearchParams({ action: "updateStatus", id, status: newStatus });
-      await fetch(SHEETS_URL + "?" + params.toString(), { method: "GET", mode: "no-cors" });
-    } catch(e) {
-      console.error("Erreur mise à jour statut", e);
-    }
-  };
-
-  const updateCommande = async (cmdModifiee) => {
-    // Mise à jour locale immédiate
-    setHistory(prev => prev.map(c => c.id === cmdModifiee.id ? cmdModifiee : c));
-    // Mise à jour Google Sheets
-    try {
-      const params = new URLSearchParams({
-        action:      "updateCommande",
-        id:          cmdModifiee.id,
-        date:        cmdModifiee.date,
-        boulangerie: cmdModifiee.boulangerie,
-        type:        cmdModifiee.type,
-        items:       cmdModifiee.items,
-        total:       cmdModifiee.total,
-        status:      cmdModifiee.status,
-        detail:      JSON.stringify(cmdModifiee.detail || [])
-      });
-      await fetch(SHEETS_URL + "?" + params.toString(), { method: "GET", mode: "no-cors" });
-    } catch(e) {
-      console.error("Erreur mise à jour commande", e);
-    }
-  };
-
-  const tabs = [
-    { id: "dashboard",   label: "Tableau de bord",            icon: "📊" },
-    { id: "commande",    label: "Commande matières premières", icon: "🌾" },
-    { id: "emballages",  label: "Commande emballages",         icon: "📦" },
-    { id: "patisserie",  label: "Commande pâtisserie",         icon: "🍰" },
-    { id: "historique",  label: "Historique",                  icon: "📋" },
-  ];
-
-  return (
-    <div style={{ minHeight:"100vh", background:"#FAF6F0", fontFamily:"'Calibri', Georgia, serif" }}>
-      <StyleTag />
-
-      {/* Header */}
-      <div className="pap-header" style={{ background:"#fff", borderBottom:"2px solid #D4A96A", boxShadow:"0 2px 10px rgba(139,69,19,.09)" }}>
-        <img src="Pense_au_pain_mise_en_page.png" alt="Pense Au Pain" style={{ height:52, width:52, objectFit:"contain", flexShrink:0 }} />
-        <div className="pap-header-title">
-          <h1 style={{ margin:0, color:"#2C1810", fontFamily:"Georgia", fontSize:18, fontWeight:800, letterSpacing:1 }}>BoulangCommande</h1>
-          <p style={{ margin:0, color:"#9B7B5A", fontSize:10, letterSpacing:2 }}>PENSE AU PAIN — GESTION DES APPROVISIONNEMENTS</p>
-        </div>
-        <div className="pap-header-controls">
-          {/* Sélecteur boulangerie : verrouillé pour les boutiques */}
-          {isAdmin ? (
-            <select className="pap-header-select" value={boulangerieId ?? ""} onChange={e => setBoulangerieId(e.target.value ? Number(e.target.value) : null)}
-              style={{
-                border:"2px solid #D4A96A", borderRadius:9,
-                background:"#fffaf5", color: boulangerieId ? "#2C1810" : "#b89878",
-                fontWeight:700, fontFamily:"Georgia, serif", cursor:"pointer", outline:"none",
-                appearance:"none",
-                backgroundImage:`url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%238B4513' stroke-width='2' fill='none' stroke-linecap='round'/%3E%3C/svg%3E")`,
-                backgroundRepeat:"no-repeat", backgroundPosition:"right 10px center"
-              }}>
-              <option value="">— Choisir une boulangerie —</option>
-              {BOULANGERIES.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-            </select>
-          ) : (
-            <div style={{ padding:"8px 14px", borderRadius:9, border:"2px solid #D4A96A", background:"#fffaf5", fontWeight:700, fontFamily:"Georgia, serif", fontSize:12, color:"#2C1810" }}>
-              🏪 {BOULANGERIES.find(b => b.id === compte.boulangerieId)?.name}
-            </div>
-          )}
-
-          {/* Badge rôle */}
-          <div style={{ padding:"4px 10px", borderRadius:10, background: isAdmin ? "#2C1810" : "#EDD5B3", color: isAdmin ? "#D4A96A" : "#8B4513", fontSize:10, fontWeight:700, whiteSpace:"nowrap", flexShrink:0 }}>
-            {isAdmin ? "👑 Admin" : "🏪 Boutique"}
-          </div>
-
-          {syncing && <span style={{ fontSize:11, color:"#E67E22", fontWeight:600, whiteSpace:"nowrap" }}>⏳ <span className="pap-header-btn-text">Sync…</span></span>}
-          {syncError && <span style={{ fontSize:11, color:"#e74c3c", fontWeight:600 }}>⚠ <span className="pap-header-btn-text">Erreur</span></span>}
-          {!syncing && !syncError && history.length > 0 && <span style={{ fontSize:11, color:"#27ae60", fontWeight:600 }}>✓ <span className="pap-header-btn-text">Synchronisé</span></span>}
-
-          <button onClick={chargerCommandes} disabled={loading}
-            style={{ padding:"7px 10px", borderRadius:9, border:"1.5px solid #D4A96A", background:"#fff", color:"#9B7B5A", cursor:"pointer", fontSize:13, flexShrink:0 }}
-            title="Rafraîchir les commandes"
-          >{loading ? "⏳" : "🔄"}</button>
-
-          <button onClick={() => { setCompte(null); setBoulangerieId(null); setHistory([]); setCart([]); }}
-            style={{ padding:"7px 12px", borderRadius:9, border:"1.5px solid #D4A96A", background:"#fff", color:"#9B7B5A", cursor:"pointer", fontSize:11, fontWeight:600, whiteSpace:"nowrap", flexShrink:0 }}
-            title="Se déconnecter"
-          >🔒 <span className="pap-header-btn-text">Déconnexion</span></button>
-        </div>
-      </div>
-
-      {/* Tabs */}
-      <div className="pap-tabs" style={{ background:"#fff", display:"flex", borderBottom:"1px solid #E8D5B7" }}>
-        {tabs.map(t => (
-          <button key={t.id} onClick={() => setTab(t.id)}
-            style={{
-              flex:1, background:"none", border:"none",
-              borderBottom: tab===t.id ? "3px solid #8B4513" : "3px solid transparent",
-              color: tab===t.id ? "#8B4513" : "#9B7B5A",
-              cursor:"pointer", fontWeight:700, fontFamily:"Georgia, serif",
-              display:"flex", alignItems:"center", justifyContent:"center", gap:6,
-              transition:"color .15s"
-            }}>
-            <span className="tab-icon">{t.icon}</span>
-            <span>{t.label}</span>
-            {t.id==="commande" && cart.length > 0 && (
-              <span style={{ background:"#8B4513", color:"#fff", borderRadius:10, fontSize:10, padding:"1px 6px", fontWeight:800 }}>
-                {cart.reduce((s,i)=>s+i.qty,0)}
-              </span>
-            )}
-            {t.id==="historique" && historyVisible.length > 0 && (
-              <span style={{ background:"#EDD5B3", color:"#8B4513", borderRadius:10, fontSize:10, padding:"1px 6px" }}>{historyVisible.length}</span>
-            )}
-          </button>
-        ))}
-      </div>
-
-      {/* Content */}
-      <div className="pap-content">
-        <div className="pap-card-inner" style={{ background:"#fff", borderRadius:14, boxShadow:"0 2px 14px rgba(139,69,19,.07)", border:"1px solid #EDD5B3", minHeight:400 }}>
-          {tab==="dashboard"   && <TabDashboard history={historyVisible} />}
-          {tab==="commande"    && <TabCommande cart={cart} setCart={setCart} boulangerieId={boulangerieId} addToHistory={addToHistory} produits={produits} setProduits={setProduits} favoris={favoris} toggleFavori={toggleFavori} />}
-          {tab==="emballages"  && <TabEmballages emballages={emballages} boulangerieId={boulangerieId} isAdmin={isAdmin} onAjouter={ajouterEmballage} onModifierStock={modifierStockEmb} onCommander={passerCommandeEmb} />}
-          {tab==="patisserie"  && <TabPatisserie boulangerieId={boulangerieId} compte={compte} isAdmin={isAdmin} />}
-          {tab==="historique"  && <TabHistorique history={historyVisible} onUpdateStatus={updateStatus} onUpdateCommande={updateCommande} isAdmin={isAdmin} />}
-        </div>
-      </div>
     </div>
   );
 }
