@@ -2150,8 +2150,6 @@ function TabDashboard({ history }) {
 // ─── COMPTES ─────────────────────────────────────────────────────────────────
 // ─── TAB PATISSERIE ──────────────────────────────────────────────────────────
 
-const PAT_URL = SHEETS_URL; // réutilise le même Apps Script
-
 function TabPatisserie({ boulangerieId, compte, isAdmin }) {
   const boulangerieNom = BOULANGERIES.find(b => b.id === boulangerieId)?.name || "";
   const isProducteur = boulangerieId === 4 || boulangerieId === 5; // La Ferrière (4) ou La Pause (5)
@@ -2174,14 +2172,15 @@ function TabPatisserie({ boulangerieId, compte, isAdmin }) {
   const [loadingCat, setLoadingCat] = useState(true);
 
   // Brouillon panier
-  async function saveBrouillon(newPanier) {
+  const brouillonKey = `pat_brouillon_${boulangerieId}`;
+  const saveBrouillon = async (newPanier) => {
     try {
       const params = new URLSearchParams({ action: "savePatBrouillon", boulangerieId, cart: JSON.stringify(newPanier) });
       await fetch(PAT_URL + "?" + params.toString(), { method: "GET", mode: "no-cors" });
     } catch(e) {}
   };
 
-  function setPanierWithSave(updater) {
+  const setPanierWithSave = (updater) => {
     setPanier(prev => {
       const next = typeof updater === "function" ? updater(prev) : updater;
       if (boulangerieId) saveBrouillon(next);
@@ -2189,7 +2188,7 @@ function TabPatisserie({ boulangerieId, compte, isAdmin }) {
     });
   };
 
-  async function chargerCatalogue() {
+  const chargerCatalogue = async () => {
     setLoadingCat(true);
     try {
       const res = await fetch(PAT_URL + "?action=getCataloguePat");
@@ -2199,7 +2198,7 @@ function TabPatisserie({ boulangerieId, compte, isAdmin }) {
     setLoadingCat(false);
   };
 
-  async function chargerHistoriquePatisserie() {
+  const chargerHistoriquePatisserie = async () => {
     try {
       const res = await fetch(PAT_URL + `?action=getHistoriquePat&boulangerieId=${boulangerieId}&isProducteur=${isProducteur}&producteurNom=${encodeURIComponent(producteurNom||"")}`);
       const data = JSON.parse(await res.text());
@@ -2207,7 +2206,7 @@ function TabPatisserie({ boulangerieId, compte, isAdmin }) {
     } catch(e) {}
   };
 
-  async function chargerBrouillonPat() {
+  const chargerBrouillonPat = async () => {
     if (!boulangerieId) return;
     try {
       const res = await fetch(PAT_URL + `?action=getPatBrouillon&boulangerieId=${boulangerieId}`);
@@ -2223,7 +2222,7 @@ function TabPatisserie({ boulangerieId, compte, isAdmin }) {
     chargerBrouillonPat();
   }, [boulangerieId]);
 
-  function isModifiable(cmd) {
+  const isModifiable = (cmd) => {
     if (isProducteur) return false;
     const now = new Date();
     const livraison = new Date(cmd.dateLivraisonISO);
@@ -2233,7 +2232,7 @@ function TabPatisserie({ boulangerieId, compte, isAdmin }) {
     return now <= limite;
   };
 
-  function getDelaiRestant(cmd) {
+  const getDelaiRestant = (cmd) => {
     const now = new Date();
     const livraison = new Date(cmd.dateLivraisonISO);
     const maxDelai = Math.max(...cmd.items.map(i => i.delai || 1));
@@ -2260,7 +2259,7 @@ function TabPatisserie({ boulangerieId, compte, isAdmin }) {
   ).length;
 
   // ── RENDU TUILE PRODUIT ──
-  function renderTuile(p) {
+  const renderTuile = (p) => {
     const key = p.id;
     const inCart = panier.find(x => x.id === key);
     const qty = qtys[key] || 1;
@@ -2756,6 +2755,7 @@ function LoginScreen({ onLogin }) {
 }
 
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbxx2jIIJon7gjoOD3HZNKJfPvCxy7BAIq3oqRZcW3F-kof8hO4F5baU9J00jnk23cvqxA/exec";
+const PAT_URL    = SHEETS_URL; // réutilise le même Apps Script
 const EMB_URL    = "https://script.google.com/macros/s/AKfycbwIv4kiUS6P8yRYQC8_smlo92e4mZqdo641ytEzRWjeZFyb-PRdgUphHF88s9Cwlaa3/exec";
 
 // ── Sous-composants modaux ───────────────────────────────────────────────────
