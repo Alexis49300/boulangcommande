@@ -1393,6 +1393,7 @@ function DetailCommande({ cmd, onClose, onUpdateStatus, onUpdateCommande }) {
 
   const [items, setItems] = useState(initialItems);
   const [editingFour, setEditingFour] = useState(null);
+  const [viewMode, setViewMode] = useState("liste"); // "liste" ou "fournisseur"
   const statusColor = { "Livré": "#217346", "En cours": "#E67E22", "Annulé": "#C0392B" };
   const statuts = ["En cours", "Livré", "Annulé"];
   const [updating, setUpdating] = useState(false);
@@ -1461,64 +1462,138 @@ function DetailCommande({ cmd, onClose, onUpdateStatus, onUpdateCommande }) {
           {updating && <div style={{ fontSize:11, color:"#E67E22", marginTop:8, textAlign:"center" }}>⏳ Mise à jour en cours…</div>}
         </div>
 
-        {/* Liste des produits */}
+        {/* Toggle vue + Liste des produits */}
         <div style={{ flex:1, overflowY:"auto" }}>
           {items.length === 0 ? (
             <p style={{ color:"#b89878", textAlign:"center", padding:20 }}>Détail non disponible pour cette commande.</p>
           ) : (
             <>
-              <div style={{ fontSize:11, color:"#9B7B5A", marginBottom:8 }}>
-                💡 Cliquez sur le fournisseur d'un produit pour le modifier avant de générer les bons
-              </div>
-              <table style={{ width:"100%", borderCollapse:"separate", borderSpacing:"0 4px" }}>
-                <thead>
-                  <tr>
-                    {["Réf.","Produit","Qté","Prix HT","Fournisseur"].map(h => (
-                      <th key={h} style={{ padding:"8px 12px", textAlign:"left", background:"#2C1810", color:"#D4A96A", fontSize:11, fontFamily:"Georgia" }}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {items.map((item, i) => (
-                    <tr key={i} style={{ background: i%2===0 ? "#fffaf5" : "#fff" }}>
-                      <td style={{ padding:"8px 12px", fontSize:10, color:"#8B4513", fontFamily:"monospace", borderRadius:"6px 0 0 6px" }}>{item.ref || "—"}</td>
-                      <td style={{ padding:"8px 12px", fontSize:12, color:"#2C1810", fontWeight:600 }}>{item.name}</td>
-                      <td style={{ padding:"8px 12px", fontSize:12, color:"#2C1810", textAlign:"center", fontWeight:700 }}>×{item.qty}</td>
-                      <td style={{ padding:"8px 12px", fontSize:12, color:"#7A5C3A" }}>{fmt(item.prix_ht)}</td>
-                      <td style={{ padding:"8px 12px", borderRadius:"0 6px 6px 0" }}>
-                        {editingFour === i ? (
-                          <div style={{ display:"flex", gap:6, alignItems:"center" }}>
-                            <select autoFocus defaultValue={item.four || ""}
-                              onChange={e => handleChangeFour(i, e.target.value)}
-                              style={{ padding:"4px 8px", border:"2px solid #D4A96A", borderRadius:6, background:"#fffaf5", color:"#2C1810", fontSize:11, cursor:"pointer", outline:"none", flex:1 }}
-                            >
-                              <option value="">— Choisir —</option>
-                              {FOURNISSEURS_LIST.map(f => <option key={f} value={f}>{f}</option>)}
-                            </select>
-                            <button onClick={() => setEditingFour(null)}
-                              style={{ background:"none", border:"none", cursor:"pointer", color:"#9B7B5A", fontSize:14 }}>✕</button>
-                          </div>
-                        ) : (
-                          <button onClick={() => setEditingFour(i)}
-                            title="Cliquer pour modifier le fournisseur"
-                            style={{
-                              display:"inline-flex", alignItems:"center", gap:5,
-                              padding:"4px 10px", borderRadius:12,
-                              background:"#f0f4ff", border:"1.5px dashed #A0B0D0",
-                              color:"#3A5A9B", fontSize:11, fontWeight:600,
-                              cursor:"pointer", transition:"all .15s"
-                            }}
-                            onMouseEnter={e => { e.currentTarget.style.background="#3A5A9B"; e.currentTarget.style.color="#fff"; e.currentTarget.style.borderStyle="solid"; }}
-                            onMouseLeave={e => { e.currentTarget.style.background="#f0f4ff"; e.currentTarget.style.color="#3A5A9B"; e.currentTarget.style.borderStyle="dashed"; }}
-                          >
-                            🏭 {item.four || "Non renseigné"} ✎
-                          </button>
-                        )}
-                      </td>
-                    </tr>
+              {/* Toggle */}
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
+                <div style={{ fontSize:11, color:"#9B7B5A" }}>
+                  💡 Cliquez sur le fournisseur pour le modifier
+                </div>
+                <div style={{ display:"flex", gap:0, borderRadius:8, overflow:"hidden", border:"1.5px solid #D4A96A" }}>
+                  {[["liste","📋 Liste"],["fournisseur","🏭 Par fournisseur"]].map(([mode, label]) => (
+                    <button key={mode} onClick={() => setViewMode(mode)}
+                      style={{
+                        padding:"5px 12px", border:"none", cursor:"pointer", fontSize:11, fontWeight:700,
+                        background: viewMode===mode ? "#8B4513" : "#fff",
+                        color: viewMode===mode ? "#fff" : "#8B4513",
+                        fontFamily:"Georgia, serif", transition:"all .15s"
+                      }}>{label}</button>
                   ))}
-                </tbody>
-              </table>
+                </div>
+              </div>
+
+              {/* Vue liste */}
+              {viewMode === "liste" && (
+                <table style={{ width:"100%", borderCollapse:"separate", borderSpacing:"0 4px" }}>
+                  <thead>
+                    <tr>
+                      {["Réf.","Produit","Qté","Prix HT","Fournisseur"].map(h => (
+                        <th key={h} style={{ padding:"8px 12px", textAlign:"left", background:"#2C1810", color:"#D4A96A", fontSize:11, fontFamily:"Georgia" }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {items.map((item, i) => (
+                      <tr key={i} style={{ background: i%2===0 ? "#fffaf5" : "#fff" }}>
+                        <td style={{ padding:"8px 12px", fontSize:10, color:"#8B4513", fontFamily:"monospace", borderRadius:"6px 0 0 6px" }}>{item.ref || "—"}</td>
+                        <td style={{ padding:"8px 12px", fontSize:12, color:"#2C1810", fontWeight:600 }}>{item.name}</td>
+                        <td style={{ padding:"8px 12px", fontSize:12, color:"#2C1810", textAlign:"center", fontWeight:700 }}>×{item.qty}</td>
+                        <td style={{ padding:"8px 12px", fontSize:12, color:"#7A5C3A" }}>{fmt(item.prix_ht)}</td>
+                        <td style={{ padding:"8px 12px", borderRadius:"0 6px 6px 0" }}>
+                          {editingFour === i ? (
+                            <div style={{ display:"flex", gap:6, alignItems:"center" }}>
+                              <select autoFocus defaultValue={item.four || ""}
+                                onChange={e => handleChangeFour(i, e.target.value)}
+                                style={{ padding:"4px 8px", border:"2px solid #D4A96A", borderRadius:6, background:"#fffaf5", color:"#2C1810", fontSize:11, cursor:"pointer", outline:"none", flex:1 }}
+                              >
+                                <option value="">— Choisir —</option>
+                                {FOURNISSEURS_LIST.map(f => <option key={f} value={f}>{f}</option>)}
+                              </select>
+                              <button onClick={() => setEditingFour(null)}
+                                style={{ background:"none", border:"none", cursor:"pointer", color:"#9B7B5A", fontSize:14 }}>✕</button>
+                            </div>
+                          ) : (
+                            <button onClick={() => setEditingFour(i)}
+                              title="Cliquer pour modifier le fournisseur"
+                              style={{
+                                display:"inline-flex", alignItems:"center", gap:5,
+                                padding:"4px 10px", borderRadius:12,
+                                background:"#f0f4ff", border:"1.5px dashed #A0B0D0",
+                                color:"#3A5A9B", fontSize:11, fontWeight:600,
+                                cursor:"pointer", transition:"all .15s"
+                              }}
+                              onMouseEnter={e => { e.currentTarget.style.background="#3A5A9B"; e.currentTarget.style.color="#fff"; e.currentTarget.style.borderStyle="solid"; }}
+                              onMouseLeave={e => { e.currentTarget.style.background="#f0f4ff"; e.currentTarget.style.color="#3A5A9B"; e.currentTarget.style.borderStyle="dashed"; }}
+                            >
+                              🏭 {item.four || "Non renseigné"} ✎
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+
+              {/* Vue par fournisseur */}
+              {viewMode === "fournisseur" && (() => {
+                const groupes = {};
+                items.forEach(item => {
+                  const four = item.four || "Non renseigné";
+                  if (!groupes[four]) groupes[four] = [];
+                  groupes[four].push(item);
+                });
+                return (
+                  <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+                    {Object.entries(groupes).sort(([a],[b]) => a.localeCompare(b)).map(([four, produits]) => {
+                      const totalHT = produits.reduce((s,p) => s + (p.prix_ht||0) * p.qty, 0);
+                      return (
+                        <div key={four} style={{ border:"1.5px solid #D4A96A", borderRadius:10, overflow:"hidden" }}>
+                          {/* Header fournisseur */}
+                          <div style={{ background:"#2C1810", padding:"8px 14px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                            <span style={{ color:"#D4A96A", fontWeight:700, fontSize:13, fontFamily:"Georgia" }}>🏭 {four}</span>
+                            <div style={{ display:"flex", gap:12, alignItems:"center" }}>
+                              <span style={{ color:"#EDD5B3", fontSize:11 }}>{produits.length} article(s)</span>
+                              <span style={{ color:"#fff", fontWeight:700, fontSize:12 }}>{fmt(totalHT)} HT</span>
+                            </div>
+                          </div>
+                          {/* Produits */}
+                          <table style={{ width:"100%", borderCollapse:"collapse" }}>
+                            <thead>
+                              <tr style={{ background:"#FAF6F0" }}>
+                                {["Réf.","Produit","Qté","Prix HT","Total HT"].map(h => (
+                                  <th key={h} style={{ padding:"6px 12px", textAlign:"left", fontSize:10, color:"#8B4513", fontWeight:700 }}>{h}</th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {produits.map((item, i) => (
+                                <tr key={i} style={{ borderTop:"1px solid #EDD5B3" }}>
+                                  <td style={{ padding:"7px 12px", fontSize:10, color:"#8B4513", fontFamily:"monospace" }}>{item.ref || "—"}</td>
+                                  <td style={{ padding:"7px 12px", fontSize:12, color:"#2C1810", fontWeight:600 }}>{item.name}</td>
+                                  <td style={{ padding:"7px 12px", fontSize:12, textAlign:"center", fontWeight:700, color:"#2C1810" }}>×{item.qty}</td>
+                                  <td style={{ padding:"7px 12px", fontSize:12, color:"#7A5C3A" }}>{fmt(item.prix_ht)}</td>
+                                  <td style={{ padding:"7px 12px", fontSize:12, fontWeight:700, color:"#2C1810" }}>{fmt((item.prix_ht||0)*item.qty)}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      );
+                    })}
+                    {/* Total global */}
+                    <div style={{ display:"flex", justifyContent:"flex-end", padding:"8px 4px", borderTop:"2px solid #D4A96A", marginTop:4 }}>
+                      <span style={{ fontSize:13, fontWeight:700, color:"#2C1810", fontFamily:"Georgia" }}>
+                        Total HT : {fmt(items.reduce((s,i) => s+(i.prix_ht||0)*i.qty, 0))}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })()}
             </>
           )}
         </div>
