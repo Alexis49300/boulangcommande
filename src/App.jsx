@@ -875,11 +875,45 @@ function MobileCartBar({ cart, boulangerieId, setCart, addToHistory }) {
   );
 }
 
-function TabCommande({ cart, setCart, boulangerieId, addToHistory, produits, setProduits, favoris, toggleFavori }) {
+function TabCommande({ cart, setCart, boulangerieId, addToHistory, produits, setProduits, favoris, toggleFavori, history }) {
   const [search, setSearch] = useState("");
   const [filterCat, setFilterCat] = useState("Tous");
   const [showModal, setShowModal] = useState(false);
   const [importMsg, setImportMsg] = useState(null);
+  const [qtys, setQtys] = useState({});
+
+  // Moyenne des quantités commandées sur les 4 dernières semaines
+  const moyennes = useMemo(() => {
+    if (!history || !history.length) return {};
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - 28); // 4 semaines
+    const map = {};
+    const weeks = {};
+    history.filter(cmd => {
+      try { return new Date(cmd.date.split("/").reverse().join("-")) >= cutoff; } catch(e) { return false; }
+    }).forEach(cmd => {
+      const items = Array.isArray(cmd.detail) ? cmd.detail : [];
+      items.forEach(item => {
+        const key = (item.ref && item.name) ? `${item.ref}__${item.name}` : (item.ref || item.name);
+        if (!key) return;
+        if (!map[key]) { map[key] = 0; weeks[key] = new Set(); }
+        map[key] += item.qty || 0;
+        // Identifier la semaine de la commande
+        try {
+          const d = new Date(cmd.date.split("/").reverse().join("-"));
+          const wk = `${d.getFullYear()}-W${Math.ceil((d - new Date(d.getFullYear(),0,1))/604800000)}`;
+          weeks[key].add(wk);
+        } catch(e) {}
+      });
+    });
+    // Diviser par le nombre de semaines où le produit a été commandé (max 4)
+    const result = {};
+    Object.keys(map).forEach(key => {
+      const nbSemaines = Math.min(weeks[key].size, 4);
+      if (nbSemaines > 0) result[key] = Math.round((map[key] / nbSemaines) * 10) / 10;
+    });
+    return result;
+  }, [history]);
   const fileInputRef = useRef(null);
 
   const filtered = useMemo(() => {
@@ -939,12 +973,12 @@ function TabCommande({ cart, setCart, boulangerieId, addToHistory, produits, set
     e.target.value = "";
   };
 
-  const addToCart = (product) => {
+  const addToCart = (product, qty = 1) => {
     setCart(prev => {
       const key = (product.ref && product.name) ? `${product.ref}__${product.name}` : (product.ref || product.name);
       const ex = prev.find(x => ((x.ref && x.name) ? `${x.ref}__${x.name}` : (x.ref || x.name)) === key);
-      if (ex) return prev.map(x => ((x.ref && x.name) ? `${x.ref}__${x.name}` : (x.ref || x.name)) === key ? { ...x, qty: x.qty + 1 } : x);
-      return [...prev, { ...product, qty: 1 }];
+      if (ex) return prev.map(x => ((x.ref && x.name) ? `${x.ref}__${x.name}` : (x.ref || x.name)) === key ? { ...x, qty: x.qty + qty } : x);
+      return [...prev, { ...product, qty }];
     });
   };
 
@@ -1101,17 +1135,36 @@ function TabCommande({ cart, setCart, boulangerieId, addToHistory, produits, set
                     {product.four}
                   </div>
                 )}
-                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginTop:4 }}>
+                {moyennes[key] && (
+                  <div style={{ fontSize:10, color:"#5B7FA6", display:"flex", alignItems:"center", gap:3 }}>
+                    <span style={{ fontSize:9 }}>📊</span>
+                    Moy. 4 sem. : <strong>{moyennes[key]}</strong>
+                  </div>
+                )}
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginTop:4, gap:6 }}>
                   <PriceTag prix_ht={product.prix_ht} tva={product.tva} />
-                  <button onClick={() => addToCart(product)}
-                    style={{
-                      padding:"6px 12px", borderRadius:7,
-                      background: inCart ? "linear-gradient(135deg,#8B4513,#6B3210)" : "linear-gradient(135deg,#C4874A,#8B4513)",
-                      color:"#fff", border:"none", cursor:"pointer",
-                      fontSize:11, fontWeight:700, transition:"all .15s",
-                    }}>
-                    {inCart ? `✓ ×${inCart.qty}` : "+ Ajouter"}
-                  </button>
+                  <div style={{ display:"flex", alignItems:"center", gap:4, flexShrink:0 }}>
+                    {inCart ? (
+                      <button onClick={() => setCart(prev => prev.filter(x => ((x.ref&&x.name)?`${x.ref}__${x.name}`:(x.ref||x.name)) !== key))}
+                        style={{ padding:"5px 10px", borderRadius:7, background:"linear-gradient(135deg,#8B4513,#6B3210)", color:"#fff", border:"none", cursor:"pointer", fontSize:11, fontWeight:700 }}>
+                        ✓ ×{inCart.qty} — Retirer
+                      </button>
+                    ) : (
+                      <>
+                        <button onClick={() => setQtys(q => ({...q, [key]: Math.max(1,(q[key]||1)-1)}))}
+                          style={{ padding:"3px 8px", borderRadius:6, border:"1px solid #D4A96A", background:"#fff", cursor:"pointer", fontSize:14, lineHeight:1 }}>−</button>
+                        <input type="number" value={qtys[key]||1} min="1"
+                          onChange={e => setQtys(q => ({...q, [key]: Math.max(1,parseInt(e.target.value)||1)}))}
+                          style={{ width:44, textAlign:"center", padding:"3px 4px", border:"1px solid #D4A96A", borderRadius:6, fontSize:12, fontWeight:700, color:"#2C1810", background:"#fffaf5" }}/>
+                        <button onClick={() => setQtys(q => ({...q, [key]: (q[key]||1)+1}))}
+                          style={{ padding:"3px 8px", borderRadius:6, border:"1px solid #D4A96A", background:"#fff", cursor:"pointer", fontSize:14, lineHeight:1 }}>+</button>
+                        <button onClick={() => { addToCart(product, qtys[key]||1); }}
+                          style={{ padding:"5px 10px", borderRadius:7, background:"linear-gradient(135deg,#C4874A,#8B4513)", color:"#fff", border:"none", cursor:"pointer", fontSize:11, fontWeight:700 }}>
+                          + Ajouter
+                        </button>
+                      </>
+                    )}
+                  </div>
                 </div>
               </div>
             );
@@ -1332,7 +1385,7 @@ function genererBonsFournisseurs(cmd, items) {
   });
 }
 
-function DetailCommande({ cmd, onClose, onUpdateStatus }) {
+function DetailCommande({ cmd, onClose, onUpdateStatus, onUpdateCommande }) {
   let initialItems = [];
   try {
     initialItems = typeof cmd.detail === "string" ? JSON.parse(cmd.detail) : (cmd.detail || []);
@@ -1352,9 +1405,14 @@ function DetailCommande({ cmd, onClose, onUpdateStatus }) {
     onClose();
   };
 
-  const handleChangeFour = (index, newFour) => {
-    setItems(prev => prev.map((item, i) => i === index ? { ...item, four: newFour } : item));
+  const handleChangeFour = async (index, newFour) => {
+    const newItems = items.map((item, i) => i === index ? { ...item, four: newFour } : item);
+    setItems(newItems);
     setEditingFour(null);
+    // Sauvegarde dans Google Sheets
+    if (onUpdateCommande) {
+      await onUpdateCommande({ ...cmd, detail: newItems });
+    }
   };
 
   return (
@@ -1951,6 +2009,9 @@ function TabHistorique({ history, onUpdateStatus, onUpdateCommande, isAdmin }) {
           onUpdateStatus={async (id, status) => {
             await onUpdateStatus(id, status);
             setCmdDetail(null);
+          }}
+          onUpdateCommande={async (cmdModifiee) => {
+            await onUpdateCommande(cmdModifiee);
           }}
         />
       )}
@@ -3334,7 +3395,7 @@ export default function App() {
       <div className="pap-content">
         <div className="pap-card-inner" style={{ background:"#fff", borderRadius:14, boxShadow:"0 2px 14px rgba(139,69,19,.07)", border:"1px solid #EDD5B3", minHeight:400 }}>
           {tab==="dashboard"   && <TabDashboard history={historyVisible} />}
-          {tab==="commande"    && <TabCommande cart={cart} setCart={setCartWithSave} boulangerieId={boulangerieId} addToHistory={addToHistory} produits={produits} setProduits={setProduits} favoris={favoris} toggleFavori={toggleFavori} />}
+          {tab==="commande"    && <TabCommande cart={cart} setCart={setCartWithSave} boulangerieId={boulangerieId} addToHistory={addToHistory} produits={produits} setProduits={setProduits} favoris={favoris} toggleFavori={toggleFavori} history={history} />}
           {tab==="emballages"  && <TabEmballages emballages={emballages} boulangerieId={boulangerieId} isAdmin={isAdmin} onAjouter={ajouterEmballage} onModifierStock={modifierStockEmb} onCommander={passerCommandeEmb} />}
           {tab==="patisserie"  && <TabPatisserie boulangerieId={boulangerieId} compte={compte} isAdmin={isAdmin} />}
           {tab==="historique"  && <TabHistorique history={historyVisible} onUpdateStatus={updateStatus} onUpdateCommande={updateCommande} isAdmin={isAdmin} />}
