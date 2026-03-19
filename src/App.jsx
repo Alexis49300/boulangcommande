@@ -3133,7 +3133,7 @@ function ModalRecette({ recette, boulangerieId, isAdmin, produits, onClose, onSa
                 <select value={ing.ref || ""} onChange={e=>selectProduit(i, e.target.value)}
                   style={{ padding:"5px 8px", border:"1px solid #D4A96A", borderRadius:6, background:"#fffaf5", fontSize:12, color:"#2C1810" }}>
                   <option value="">— Choisir —</option>
-                  {produits.slice(0,200).map(p => (
+                  {produits.map(p => (
                     <option key={p.ref || p.name} value={p.ref}>{p.name}</option>
                   ))}
                 </select>
