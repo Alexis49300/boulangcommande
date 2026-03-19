@@ -881,6 +881,7 @@ function TabCommande({ cart, setCart, boulangerieId, addToHistory, produits, set
   const [showModal, setShowModal] = useState(false);
   const [importMsg, setImportMsg] = useState(null);
   const [qtys, setQtys] = useState({});
+  const [showPrixFour, setShowPrixFour] = useState(null);
 
   // Moyenne des quantités commandées sur les 4 dernières semaines
   const moyennes = useMemo(() => {
@@ -940,6 +941,16 @@ function TabCommande({ cart, setCart, boulangerieId, addToHistory, produits, set
       const ws = wb.Sheets[sheetName];
       const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null });
 
+      // Lire les headers pour identifier les fournisseurs colonnes D-H
+      const headerRow = rows[0] || [];
+      const fourHeaders = [
+        headerRow[3] ? String(headerRow[3]).trim() : "Fuseau",
+        headerRow[4] ? String(headerRow[4]).trim() : "BackEurop",
+        headerRow[5] ? String(headerRow[5]).trim() : "Team Ouest",
+        headerRow[6] ? String(headerRow[6]).trim() : "Autres",
+        headerRow[7] ? String(headerRow[7]).trim() : "Richard Distribution",
+      ];
+
       const nouveaux = [];
       for (let i = 2; i < rows.length; i++) {
         const row = rows[i];
@@ -951,7 +962,13 @@ function TabCommande({ cart, setCart, boulangerieId, addToHistory, produits, set
         if (!name || isNaN(prix) || prix <= 0) continue;
         const ancien = ALL_PRODUCTS.find(p => p.ref === ref || p.name === name);
         const cat = ancien?.cat || "Divers";
-        nouveaux.push({ ref, name, unit, prix_ht: prix, tva: 0.055, cat, four });
+        // Prix par fournisseur colonnes D(3) à H(7)
+        const prix_fournisseurs = {};
+        [3,4,5,6,7].forEach((col, idx) => {
+          const p = parseFloat(row[col]);
+          if (!isNaN(p) && p > 0) prix_fournisseurs[fourHeaders[idx]] = p;
+        });
+        nouveaux.push({ ref, name, unit, prix_ht: prix, tva: 0.055, cat, four, prix_fournisseurs });
       }
       if (nouveaux.length === 0) {
         setImportMsg({ type: "error", text: "❌ Aucun produit trouvé dans le fichier." });
@@ -1141,8 +1158,42 @@ function TabCommande({ cart, setCart, boulangerieId, addToHistory, produits, set
                     Moy. 4 sem. : <strong>{moyennes[key]}</strong>
                   </div>
                 )}
+                {/* Panel tarifs fournisseurs */}
+                {showPrixFour === key && product.prix_fournisseurs && Object.keys(product.prix_fournisseurs).length > 0 && (
+                  <div style={{ background:"#FAF6F0", border:"1px solid #D4A96A", borderRadius:8, padding:"8px 10px", marginTop:4 }}>
+                    <div style={{ fontSize:10, fontWeight:700, color:"#8B4513", marginBottom:5 }}>Tarifs par fournisseur (HT)</div>
+                    {Object.entries(product.prix_fournisseurs)
+                      .sort(([,a],[,b]) => a - b)
+                      .map(([four, prix]) => (
+                        <div key={four} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"2px 0", borderBottom:"1px solid #EDD5B3" }}>
+                          <span style={{ fontSize:10, color: four === product.four ? "#8B4513" : "#2C1810", fontWeight: four === product.four ? 700 : 400 }}>
+                            {four === product.four ? "✓ " : ""}{four}
+                          </span>
+                          <span style={{ fontSize:11, fontWeight:700, color: four === product.four ? "#8B4513" : "#2C1810" }}>
+                            {Number(prix).toFixed(2)} €
+                          </span>
+                        </div>
+                      ))
+                    }
+                  </div>
+                )}
                 <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginTop:4, gap:6 }}>
-                  <PriceTag prix_ht={product.prix_ht} tva={product.tva} />
+                  <div style={{ display:"flex", flexDirection:"column", gap:2 }}>
+                    <div style={{ fontSize:13, fontWeight:700, color:"#2C1810" }}>{Number(product.prix_ht).toFixed(2)} € <span style={{ fontSize:10, color:"#9B7B5A", fontWeight:400 }}>HT</span></div>
+                    <div style={{ fontSize:10, color:"#9B7B5A" }}>{(product.prix_ht * (1 + product.tva)).toFixed(2)} € TTC</div>
+                  </div>
+                  {product.prix_fournisseurs && Object.keys(product.prix_fournisseurs).length > 0 && (
+                    <button onClick={() => setShowPrixFour(showPrixFour === key ? null : key)}
+                      title="Voir les tarifs de tous les fournisseurs"
+                      style={{
+                        padding:"3px 8px", borderRadius:6, border:"1px solid #D4A96A",
+                        background: showPrixFour === key ? "#8B4513" : "#fffaf5",
+                        color: showPrixFour === key ? "#fff" : "#8B4513",
+                        cursor:"pointer", fontSize:10, fontWeight:700, whiteSpace:"nowrap"
+                      }}>
+                      {showPrixFour === key ? "✕ Fermer" : "📊 Tarifs"}
+                    </button>
+                  )}
                   <div style={{ display:"flex", alignItems:"center", gap:4, flexShrink:0 }}>
                     {inCart ? (
                       <button onClick={() => setCart(prev => prev.filter(x => ((x.ref&&x.name)?`${x.ref}__${x.name}`:(x.ref||x.name)) !== key))}
