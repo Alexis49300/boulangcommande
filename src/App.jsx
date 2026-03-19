@@ -2871,13 +2871,38 @@ function TabCoutMatiere({ boulangerieId, isAdmin, produits }) {
   }
 
   async function sauvegarderRecette(recette) {
-    await postToSheets(SHEETS_URL, { action: "saveRecette", recette });
+    try {
+      // Tentative POST avec réponse
+      const res = await fetch(SHEETS_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "saveRecette", recette })
+      });
+      const data = JSON.parse(await res.text());
+      if (!data.success) throw new Error(data.error || "Erreur inconnue");
+    } catch(e) {
+      // Fallback no-cors si CORS bloqué
+      await postToSheets(SHEETS_URL, { action: "saveRecette", recette });
+      // Attendre que Sheets traite la requête
+      await new Promise(r => setTimeout(r, 1500));
+    }
     await chargerRecettes();
   }
 
   async function supprimerRecette(id) {
     if (!window.confirm("Supprimer cette recette ?")) return;
-    await postToSheets(SHEETS_URL, { action: "deleteRecette", id });
+    try {
+      const res = await fetch(SHEETS_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "deleteRecette", id })
+      });
+      const data = JSON.parse(await res.text());
+      if (!data.success) throw new Error(data.error || "Erreur inconnue");
+    } catch(e) {
+      await postToSheets(SHEETS_URL, { action: "deleteRecette", id });
+      await new Promise(r => setTimeout(r, 1500));
+    }
     await chargerRecettes();
   }
 
