@@ -2871,39 +2871,22 @@ function TabCoutMatiere({ boulangerieId, isAdmin, produits }) {
   }
 
   async function sauvegarderRecette(recette) {
-    try {
-      // Tentative POST avec réponse
-      const res = await fetch(SHEETS_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "saveRecette", recette })
-      });
-      const data = JSON.parse(await res.text());
-      if (!data.success) throw new Error(data.error || "Erreur inconnue");
-    } catch(e) {
-      // Fallback no-cors si CORS bloqué
-      await postToSheets(SHEETS_URL, { action: "saveRecette", recette });
-      // Attendre que Sheets traite la requête
-      await new Promise(r => setTimeout(r, 1500));
-    }
-    await chargerRecettes();
+    // Mise à jour locale immédiate
+    setRecettes(prev => {
+      const exists = prev.find(r => r.id === recette.id);
+      if (exists) return prev.map(r => r.id === recette.id ? recette : r);
+      return [...prev, recette];
+    });
+    // Sync en arrière-plan
+    await postToSheets(SHEETS_URL, { action: "saveRecette", recette });
   }
 
   async function supprimerRecette(id) {
     if (!window.confirm("Supprimer cette recette ?")) return;
-    try {
-      const res = await fetch(SHEETS_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "deleteRecette", id })
-      });
-      const data = JSON.parse(await res.text());
-      if (!data.success) throw new Error(data.error || "Erreur inconnue");
-    } catch(e) {
-      await postToSheets(SHEETS_URL, { action: "deleteRecette", id });
-      await new Promise(r => setTimeout(r, 1500));
-    }
-    await chargerRecettes();
+    // Suppression locale immédiate
+    setRecettes(prev => prev.filter(r => r.id !== id));
+    // Sync en arrière-plan
+    await postToSheets(SHEETS_URL, { action: "deleteRecette", id });
   }
 
   function calcRecette(r) {
