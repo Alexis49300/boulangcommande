@@ -2848,6 +2848,325 @@ function TabPatisserie({ boulangerieId, compte, isAdmin }) {
   );
 }
 
+// ─── TAB COUT MATIERE ────────────────────────────────────────────────────────
+
+function TabCoutMatiere({ boulangerieId, isAdmin, produits }) {
+  const [recettes, setRecettes] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showModal, setShowModal] = useState(false);
+  const [editRecette, setEditRecette] = useState(null);
+
+  useEffect(() => { chargerRecettes(); }, [boulangerieId]);
+
+  async function chargerRecettes() {
+    if (!boulangerieId && !isAdmin) return;
+    setLoading(true);
+    try {
+      const boulId = isAdmin ? "all" : boulangerieId;
+      const res = await fetch(SHEETS_URL + `?action=getRecettes&boulangerieId=${boulId}`);
+      const data = JSON.parse(await res.text());
+      if (data.success) setRecettes(data.recettes || []);
+    } catch(e) { console.error(e); }
+    setLoading(false);
+  }
+
+  async function sauvegarderRecette(recette) {
+    await postToSheets(SHEETS_URL, { action: "saveRecette", recette });
+    await chargerRecettes();
+  }
+
+  async function supprimerRecette(id) {
+    if (!window.confirm("Supprimer cette recette ?")) return;
+    await postToSheets(SHEETS_URL, { action: "deleteRecette", id });
+    await chargerRecettes();
+  }
+
+  function calcRecette(r) {
+    // Mettre à jour les prix depuis la mercuriale actuelle
+    const ingredients = (r.ingredients || []).map(ing => {
+      const prodMerc = produits.find(p => p.ref === ing.ref || p.name === ing.name);
+      const prixActuel = prodMerc ? prodMerc.prix_ht : ing.prix_ht;
+      return { ...ing, prix_ht: prixActuel };
+    });
+    const coutTotal = ingredients.reduce((s, i) => s + (i.prix_ht || 0) * (i.qte || 0), 0);
+    const coutUnit = r.qte > 0 ? coutTotal / r.qte : 0;
+    const pvHT = (r.pv || 0) / 1.055;
+    const marge = pvHT - coutUnit;
+    const margeP = pvHT > 0 ? (marge / pvHT) * 100 : 0;
+    const coeff = coutUnit > 0 ? r.pv / coutUnit : 0;
+    return { coutTotal, coutUnit, pvHT, marge, margeP, coeff, ingredients };
+  }
+
+  function getMargeColor(p) {
+    if (p >= 65) return "#217346";
+    if (p >= 50) return "#E67E22";
+    return "#C0392B";
+  }
+
+  function getMargeLabel(p) {
+    if (p >= 65) return "Bonne marge";
+    if (p >= 50) return "Marge correcte";
+    return "Marge faible";
+  }
+
+  const recettesFiltrees = isAdmin ? recettes : recettes.filter(r => r.boulangerieId === boulangerieId);
+
+  return (
+    <div style={{ padding:16 }}>
+      {/* Header */}
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16, flexWrap:"wrap", gap:8 }}>
+        <div style={{ fontSize:11, color:"#9B7B5A" }}>
+          {recettesFiltrees.length} recette(s) · Prix mis à jour depuis la mercuriale
+        </div>
+        <button onClick={() => { setEditRecette(null); setShowModal(true); }}
+          style={{ padding:"7px 16px", borderRadius:8, border:"none", background:"#8B4513", color:"#fff", cursor:"pointer", fontSize:12, fontWeight:700, fontFamily:"Georgia, serif" }}>
+          + Nouvelle recette
+        </button>
+      </div>
+
+      {loading ? (
+        <div style={{ textAlign:"center", padding:40, color:"#9B7B5A" }}>Chargement…</div>
+      ) : recettesFiltrees.length === 0 ? (
+        <div style={{ textAlign:"center", padding:50, color:"#9B7B5A" }}>
+          <div style={{ fontSize:32, marginBottom:8 }}>🧮</div>
+          Aucune recette — cliquez sur "+ Nouvelle recette" pour commencer.
+        </div>
+      ) : (
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(320px,1fr))", gap:12 }}>
+          {recettesFiltrees.map(r => {
+            const c = calcRecette(r);
+            const margeColor = getMargeColor(c.margeP);
+            return (
+              <div key={r.id} style={{ background:"#fff", border:"1px solid #EDD5B3", borderRadius:12, padding:14, display:"flex", flexDirection:"column", gap:10 }}>
+                {/* Header recette */}
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
+                  <div>
+                    <div style={{ fontWeight:700, fontSize:14, color:"#2C1810", fontFamily:"Georgia" }}>{r.nom}</div>
+                    <div style={{ fontSize:11, color:"#9B7B5A", marginTop:2 }}>
+                      {r.qte} pièce(s) · PV {Number(r.pv).toFixed(2)} € TTC
+                    </div>
+                  </div>
+                  <div style={{ display:"flex", gap:4 }}>
+                    <button onClick={() => { setEditRecette(r); setShowModal(true); }}
+                      style={{ padding:"4px 10px", borderRadius:6, border:"1px solid #D4A96A", background:"#fff", color:"#8B4513", cursor:"pointer", fontSize:11 }}>
+                      Modifier
+                    </button>
+                    <button onClick={() => supprimerRecette(r.id)}
+                      style={{ padding:"4px 8px", borderRadius:6, border:"1px solid #e74c3c", background:"#fff", color:"#e74c3c", cursor:"pointer", fontSize:11 }}>
+                      ✕
+                    </button>
+                  </div>
+                </div>
+
+                {/* Métriques */}
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:6 }}>
+                  {[
+                    { label:"Coût/pièce", value:`${c.coutUnit.toFixed(3)} €`, color:"#2C1810" },
+                    { label:"Coefficient", value:`${c.coeff.toFixed(2)}×`, color:"#8B4513" },
+                    { label:"Marge nette", value:`${c.margeP.toFixed(1)} %`, color:margeColor },
+                  ].map(m => (
+                    <div key={m.label} style={{ background:"#FAF6F0", borderRadius:8, padding:"8px 10px" }}>
+                      <div style={{ fontSize:10, color:"#9B7B5A", marginBottom:3 }}>{m.label}</div>
+                      <div style={{ fontSize:14, fontWeight:700, color:m.color }}>{m.value}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Ingrédients */}
+                <table style={{ width:"100%", borderCollapse:"collapse", fontSize:11 }}>
+                  <thead>
+                    <tr style={{ background:"#FAF6F0" }}>
+                      {["Ingrédient","Qté","Coût"].map(h => (
+                        <th key={h} style={{ padding:"4px 8px", textAlign: h==="Coût"?"right":"left", color:"#8B4513", fontWeight:700 }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {c.ingredients.map((ing, i) => (
+                      <tr key={i} style={{ borderTop:"1px solid #EDD5B3" }}>
+                        <td style={{ padding:"4px 8px", color:"#2C1810" }}>{ing.name}</td>
+                        <td style={{ padding:"4px 8px", color:"#9B7B5A" }}>{ing.qte} {ing.unit}</td>
+                        <td style={{ padding:"4px 8px", textAlign:"right", fontWeight:600, color:"#2C1810" }}>{(ing.prix_ht * ing.qte).toFixed(3)} €</td>
+                      </tr>
+                    ))}
+                    <tr style={{ borderTop:"1.5px solid #D4A96A", background:"#FAF6F0" }}>
+                      <td colSpan="2" style={{ padding:"5px 8px", fontWeight:700, color:"#9B7B5A" }}>Total recette ({r.qte} pcs)</td>
+                      <td style={{ padding:"5px 8px", textAlign:"right", fontWeight:700, color:"#2C1810" }}>{c.coutTotal.toFixed(2)} €</td>
+                    </tr>
+                  </tbody>
+                </table>
+
+                {/* Bilan */}
+                <div style={{ padding:"8px 10px", background:"#FAF6F0", borderRadius:8, display:"flex", justifyContent:"space-between", fontSize:11 }}>
+                  <span style={{ color:"#9B7B5A" }}>
+                    PV HT : {c.pvHT.toFixed(2)} € · Marge : {c.marge.toFixed(3)} €/pièce
+                  </span>
+                  <span style={{ fontWeight:700, color:margeColor }}>{getMargeLabel(c.margeP)}</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Modal création/édition */}
+      {showModal && (
+        <ModalRecette
+          recette={editRecette}
+          boulangerieId={boulangerieId}
+          isAdmin={isAdmin}
+          produits={produits}
+          onClose={() => { setShowModal(false); setEditRecette(null); }}
+          onSave={async (rec) => { await sauvegarderRecette(rec); setShowModal(false); setEditRecette(null); }}
+        />
+      )}
+    </div>
+  );
+}
+
+function ModalRecette({ recette, boulangerieId, isAdmin, produits, onClose, onSave }) {
+  const [nom, setNom] = useState(recette?.nom || "");
+  const [qte, setQte] = useState(recette?.qte || 1);
+  const [pv, setPv] = useState(recette?.pv || "");
+  const [ingredients, setIngredients] = useState(recette?.ingredients?.map(i=>({...i})) || []);
+  const [saving, setSaving] = useState(false);
+
+  const boulangeries = BOULANGERIES.map(b => ({ id: b.id, name: b.name }));
+  const [selectedBoul, setSelectedBoul] = useState(recette?.boulangerieId || boulangerieId);
+
+  function addIngredient() {
+    setIngredients(prev => [...prev, { ref:"", name:"", qte:0, unit:"kg", prix_ht:0 }]);
+  }
+
+  function updateIngredient(i, field, val) {
+    setIngredients(prev => prev.map((ing, j) => j === i ? { ...ing, [field]: val } : ing));
+  }
+
+  function selectProduit(i, ref) {
+    const p = produits.find(x => x.ref === ref);
+    if (p) setIngredients(prev => prev.map((ing, j) => j === i ? { ...ing, ref: p.ref, name: p.name, unit: p.unit || "kg", prix_ht: p.prix_ht } : ing));
+  }
+
+  function removeIngredient(i) {
+    setIngredients(prev => prev.filter((_, j) => j !== i));
+  }
+
+  const coutTotal = ingredients.reduce((s, i) => s + (i.prix_ht || 0) * (i.qte || 0), 0);
+  const coutUnit = qte > 0 ? coutTotal / qte : 0;
+  const pvHT = parseFloat(pv) / 1.055;
+  const margeP = pvHT > 0 ? ((pvHT - coutUnit) / pvHT) * 100 : 0;
+  const coeff = coutUnit > 0 ? parseFloat(pv) / coutUnit : 0;
+
+  async function handleSave() {
+    if (!nom.trim()) { alert("Veuillez saisir un nom."); return; }
+    if (!ingredients.filter(i => i.name && i.qte > 0).length) { alert("Ajoutez au moins un ingrédient."); return; }
+    setSaving(true);
+    await onSave({
+      id: recette?.id || ("REC-" + Date.now()),
+      nom: nom.trim(),
+      boulangerieId: selectedBoul,
+      qte: parseInt(qte) || 1,
+      pv: parseFloat(pv) || 0,
+      ingredients: ingredients.filter(i => i.name && i.qte > 0),
+    });
+    setSaving(false);
+  }
+
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.45)", zIndex:1000, display:"flex", alignItems:"flex-start", justifyContent:"center", paddingTop:20, overflowY:"auto" }}>
+      <div style={{ background:"#fff", borderRadius:14, border:"1px solid #EDD5B3", width:620, maxWidth:"95%", padding:22, marginBottom:20 }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+          <span style={{ fontSize:15, fontWeight:700, color:"#2C1810", fontFamily:"Georgia" }}>
+            {recette ? "Modifier : " + recette.nom : "Nouvelle recette"}
+          </span>
+          <button onClick={onClose} style={{ background:"none", border:"1px solid #D4A96A", borderRadius:6, cursor:"pointer", padding:"3px 9px", color:"#8B4513" }}>✕</button>
+        </div>
+
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:14 }}>
+          <div>
+            <label style={{ fontSize:11, color:"#9B7B5A", display:"block", marginBottom:3 }}>Nom de la recette</label>
+            <input value={nom} onChange={e=>setNom(e.target.value)} placeholder="Ex: Croissant beurre"
+              style={{ width:"100%", padding:"7px 10px", border:"2px solid #D4A96A", borderRadius:8, background:"#fffaf5", fontSize:13, boxSizing:"border-box" }}/>
+          </div>
+          <div>
+            <label style={{ fontSize:11, color:"#9B7B5A", display:"block", marginBottom:3 }}>Boulangerie</label>
+            <select value={selectedBoul} onChange={e=>setSelectedBoul(Number(e.target.value))}
+              disabled={!isAdmin}
+              style={{ width:"100%", padding:"7px 10px", border:"2px solid #D4A96A", borderRadius:8, background:"#fffaf5", fontSize:13 }}>
+              {boulangeries.map(b => <option key={b.id} value={b.id}>{b.name.replace("Pense Au Pain ","")}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={{ fontSize:11, color:"#9B7B5A", display:"block", marginBottom:3 }}>Quantité produite</label>
+            <input type="number" value={qte} min="1" onChange={e=>{setQte(e.target.value);}}
+              style={{ width:"100%", padding:"7px 10px", border:"2px solid #D4A96A", borderRadius:8, background:"#fffaf5", fontSize:13, boxSizing:"border-box" }}/>
+          </div>
+          <div>
+            <label style={{ fontSize:11, color:"#9B7B5A", display:"block", marginBottom:3 }}>Prix de vente unitaire (€ TTC)</label>
+            <input type="number" step="0.01" value={pv} onChange={e=>setPv(e.target.value)} placeholder="1.20"
+              style={{ width:"100%", padding:"7px 10px", border:"2px solid #D4A96A", borderRadius:8, background:"#fffaf5", fontSize:13, boxSizing:"border-box" }}/>
+          </div>
+        </div>
+
+        {/* Recap live */}
+        {coutTotal > 0 && parseFloat(pv) > 0 && (
+          <div style={{ display:"flex", gap:12, padding:"8px 12px", background:"#FAF6F0", borderRadius:8, marginBottom:12, fontSize:12, flexWrap:"wrap" }}>
+            <span style={{ color:"#9B7B5A" }}>Coût total : <strong style={{ color:"#2C1810" }}>{coutTotal.toFixed(2)} €</strong></span>
+            <span style={{ color:"#9B7B5A" }}>Coût/pièce : <strong style={{ color:"#2C1810" }}>{coutUnit.toFixed(3)} €</strong></span>
+            <span style={{ color:"#9B7B5A" }}>Coefficient : <strong style={{ color:"#8B4513" }}>{coeff.toFixed(2)}×</strong></span>
+            <span style={{ color:"#9B7B5A" }}>Marge : <strong style={{ color: margeP>=65?"#217346":margeP>=50?"#E67E22":"#C0392B" }}>{margeP.toFixed(1)} %</strong></span>
+          </div>
+        )}
+
+        {/* Ingrédients */}
+        <div style={{ marginBottom:12 }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
+            <label style={{ fontSize:11, color:"#9B7B5A" }}>Ingrédients</label>
+            <button onClick={addIngredient}
+              style={{ padding:"4px 10px", borderRadius:6, border:"1px solid #D4A96A", background:"#fff", color:"#8B4513", cursor:"pointer", fontSize:11 }}>
+              + Ajouter
+            </button>
+          </div>
+          <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+            {ingredients.map((ing, i) => (
+              <div key={i} style={{ display:"grid", gridTemplateColumns:"2fr 80px 60px 70px 28px", gap:6, alignItems:"center" }}>
+                <select value={ing.ref || ""} onChange={e=>selectProduit(i, e.target.value)}
+                  style={{ padding:"5px 8px", border:"1px solid #D4A96A", borderRadius:6, background:"#fffaf5", fontSize:12, color:"#2C1810" }}>
+                  <option value="">— Choisir —</option>
+                  {produits.slice(0,200).map(p => (
+                    <option key={p.ref || p.name} value={p.ref}>{p.name}</option>
+                  ))}
+                </select>
+                <input type="number" step="0.001" min="0" value={ing.qte || ""} placeholder="Qté"
+                  onChange={e=>updateIngredient(i, "qte", parseFloat(e.target.value)||0)}
+                  style={{ padding:"5px 6px", border:"1px solid #D4A96A", borderRadius:6, background:"#fffaf5", fontSize:12, textAlign:"right", color:"#2C1810" }}/>
+                <span style={{ fontSize:11, color:"#9B7B5A", textAlign:"center" }}>{ing.unit}</span>
+                <span style={{ fontSize:11, color:"#9B7B5A", textAlign:"right" }}>
+                  {ing.prix_ht && ing.qte ? `${(ing.prix_ht * ing.qte).toFixed(3)} €` : "—"}
+                </span>
+                <button onClick={()=>removeIngredient(i)}
+                  style={{ background:"none", border:"none", cursor:"pointer", color:"#e74c3c", fontSize:14, padding:0 }}>✕</button>
+              </div>
+            ))}
+            {ingredients.length === 0 && (
+              <div style={{ fontSize:12, color:"#9B7B5A", textAlign:"center", padding:12 }}>Cliquez sur "+ Ajouter" pour ajouter des ingrédients</div>
+            )}
+          </div>
+        </div>
+
+        <div style={{ display:"flex", justifyContent:"flex-end", gap:8, borderTop:"1px solid #EDD5B3", paddingTop:12 }}>
+          <button onClick={onClose} style={{ padding:"6px 14px", borderRadius:7, border:"1px solid #D4A96A", background:"#fff", color:"#8B4513", cursor:"pointer", fontSize:12 }}>Annuler</button>
+          <button onClick={handleSave} disabled={saving}
+            style={{ padding:"6px 14px", borderRadius:7, border:"none", background:"#8B4513", color:"#fff", cursor:"pointer", fontSize:12, fontWeight:700, opacity:saving?0.6:1 }}>
+            {saving ? "Enregistrement…" : "Enregistrer"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
 // Pour changer un mot de passe, modifiez simplement la valeur "pwd" du compte concerné
 const COMPTES = [
   { pwd: "admin2025",   role: "admin",       boulangerieId: null, label: "Administrateur" },
@@ -3409,6 +3728,7 @@ export default function App() {
     { id: "commande",    label: "Commande matières premières", icon: "🌾" },
     { id: "emballages",  label: "Commande emballages",         icon: "📦" },
     { id: "patisserie",  label: "Commande pâtisserie",         icon: "🍰" },
+    { id: "coutmatiere", label: "Coût matière",                icon: "🧮" },
     { id: "historique",  label: "Historique",                  icon: "📋" },
   ];
 
@@ -3524,6 +3844,7 @@ export default function App() {
           {tab==="commande"    && <TabCommande cart={cart} setCart={setCartWithSave} boulangerieId={boulangerieId} addToHistory={addToHistory} produits={produits} setProduits={setProduits} favoris={favoris} toggleFavori={toggleFavori} history={history} />}
           {tab==="emballages"  && <TabEmballages emballages={emballages} boulangerieId={boulangerieId} isAdmin={isAdmin} onAjouter={ajouterEmballage} onModifierStock={modifierStockEmb} onCommander={passerCommandeEmb} />}
           {tab==="patisserie"  && <TabPatisserie boulangerieId={boulangerieId} compte={compte} isAdmin={isAdmin} />}
+          {tab==="coutmatiere" && <TabCoutMatiere boulangerieId={boulangerieId} isAdmin={isAdmin} produits={produits} />}
           {tab==="historique"  && <TabHistorique history={historyVisible} onUpdateStatus={updateStatus} onUpdateCommande={updateCommande} isAdmin={isAdmin} />}
         </div>
       </div>
