@@ -2877,16 +2877,30 @@ function TabCoutMatiere({ boulangerieId, isAdmin, produits }) {
       if (exists) return prev.map(r => r.id === recette.id ? recette : r);
       return [...prev, recette];
     });
-    // Sync en arrière-plan
-    await postToSheets(SHEETS_URL, { action: "saveRecette", recette });
+    // Sync GET (comme toutes les autres sauvegardes)
+    try {
+      const params = new URLSearchParams({
+        action: "saveRecette",
+        id: recette.id,
+        nom: recette.nom,
+        boulangerieId: recette.boulangerieId,
+        qte: recette.qte,
+        pv: recette.pv,
+        ingredients: JSON.stringify(recette.ingredients)
+      });
+      await fetch(SHEETS_URL + "?" + params.toString(), { method: "GET", mode: "no-cors" });
+    } catch(e) { console.error("Erreur sauvegarde recette", e); }
   }
 
   async function supprimerRecette(id) {
     if (!window.confirm("Supprimer cette recette ?")) return;
     // Suppression locale immédiate
     setRecettes(prev => prev.filter(r => r.id !== id));
-    // Sync en arrière-plan
-    await postToSheets(SHEETS_URL, { action: "deleteRecette", id });
+    // Sync GET
+    try {
+      const params = new URLSearchParams({ action: "deleteRecette", id });
+      await fetch(SHEETS_URL + "?" + params.toString(), { method: "GET", mode: "no-cors" });
+    } catch(e) { console.error("Erreur suppression recette", e); }
   }
 
   function calcRecette(r) {
