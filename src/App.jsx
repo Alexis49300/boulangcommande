@@ -2365,7 +2365,8 @@ function TabHistorique({ history, onUpdateStatus, onUpdateCommande, isAdmin }) {
                 </div>
               </div>
             </div>
-          ))}
+          );
+          })}
         </div>
       )}
     </div>
