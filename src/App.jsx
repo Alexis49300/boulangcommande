@@ -1676,8 +1676,8 @@ function DetailCommande({ cmd, onClose, onUpdateStatus, onUpdateCommande }) {
               <span style={{ fontSize:15, fontWeight:800, color:"#2C1810", fontFamily:"Georgia" }}>{fmt(cmd.total)} TTC</span>
             </div>
           </div>
-        );
-          })}
+          );
+        })}
         </div>
     </div>
   );
