@@ -1676,8 +1676,9 @@ function DetailCommande({ cmd, onClose, onUpdateStatus, onUpdateCommande }) {
               <span style={{ fontSize:15, fontWeight:800, color:"#2C1810", fontFamily:"Georgia" }}>{fmt(cmd.total)} TTC</span>
             </div>
           </div>
-        )}
-      </div>
+        );
+          })}
+        </div>
     </div>
   );
 }
@@ -2116,9 +2117,13 @@ function TabHistorique({ history, onUpdateStatus, onUpdateCommande, isAdmin }) {
   const [filterType, setFilterType] = useState("Tous");
   const [cmdDetail, setCmdDetail] = useState(null);
   const [cmdModif, setCmdModif] = useState(null);
+  const [fusionMode, setFusionMode] = useState(false);
+  const [fusionSelection, setFusionSelection] = useState([]);
+  const [showFusionConfirm, setShowFusionConfirm] = useState(false);
 
   const filtered = history.filter(c => {
-    return (filterB === "Tous" || c.boulangerie === filterB) &&
+    return c.status !== "Fusionné" &&
+           (filterB === "Tous" || c.boulangerie === filterB) &&
            (filterStatus === "Tous" || c.status === filterStatus) &&
            (filterType === "Tous" || c.type === filterType);
   });
@@ -2167,20 +2172,144 @@ function TabHistorique({ history, onUpdateStatus, onUpdateCommande, isAdmin }) {
           {["Tous","Matières premières","Emballages"].map(t => <option key={t}>{t}</option>)}
         </select>
         <span style={{ fontSize:11, color:"#9B7B5A", whiteSpace:"nowrap" }}>{filtered.length} commande(s)</span>
+        {isAdmin && (
+          <button onClick={() => { setFusionMode(!fusionMode); setFusionSelection([]); }}
+            style={{
+              padding:"7px 14px", borderRadius:8, fontSize:11, fontWeight:700, cursor:"pointer",
+              border: fusionMode ? "none" : "1.5px solid #8B4513",
+              background: fusionMode ? "#C0392B" : "#fff",
+              color: fusionMode ? "#fff" : "#8B4513",
+              whiteSpace:"nowrap"
+            }}>
+            {fusionMode ? "✕ Annuler fusion" : "⇌ Fusionner"}
+          </button>
+        )}
       </div>
+
+      {/* Bannière mode fusion */}
+      {fusionMode && (
+        <div style={{
+          background: fusionSelection.length === 2 ? "#EAF3DE" : "#FFF8E1",
+          border: `1.5px solid ${fusionSelection.length === 2 ? "#27ae60" : "#F5A623"}`,
+          borderRadius:10, padding:"10px 16px", marginBottom:12,
+          display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:8
+        }}>
+          <div style={{ fontSize:12, color: fusionSelection.length === 2 ? "#27500A" : "#7D5A00", fontWeight:700 }}>
+            {fusionSelection.length === 0 && "Sélectionnez 2 commandes à fusionner"}
+            {fusionSelection.length === 1 && "1 commande sélectionnée — sélectionnez la 2ème"}
+            {fusionSelection.length === 2 && "2 commandes sélectionnées — prêtes à fusionner"}
+          </div>
+          {fusionSelection.length === 2 && (
+            <button onClick={() => setShowFusionConfirm(true)}
+              style={{ padding:"7px 16px", borderRadius:8, border:"none", background:"#27ae60", color:"#fff", fontWeight:700, fontSize:12, cursor:"pointer" }}>
+              ⇌ Fusionner les 2 commandes
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Modal confirmation fusion */}
+      {showFusionConfirm && fusionSelection.length === 2 && (() => {
+        const [c1, c2] = fusionSelection.map(id => history.find(c => c.id === id));
+        if (!c1 || !c2) return null;
+        // La plus récente = date la plus grande
+        const base = new Date(c1.date?.split("/").reverse().join("-")) >= new Date(c2.date?.split("/").reverse().join("-")) ? c1 : c2;
+        const other = base.id === c1.id ? c2 : c1;
+        // Fusionner les articles
+        const detail1 = Array.isArray(c1.detail) ? c1.detail : [];
+        const detail2 = Array.isArray(c2.detail) ? c2.detail : [];
+        const mergedDetail = [...detail1];
+        detail2.forEach(item2 => {
+          const key2 = (item2.ref && item2.name) ? `${item2.ref}__${item2.name}` : (item2.ref || item2.name);
+          const existing = mergedDetail.find(i => {
+            const k = (i.ref && i.name) ? `${i.ref}__${i.name}` : (i.ref || i.name);
+            return k === key2;
+          });
+          if (existing) existing.qty = (existing.qty || 0) + (item2.qty || 0);
+          else mergedDetail.push({...item2});
+        });
+        const totalMerged = mergedDetail.reduce((s, i) => s + (i.prix_ht || 0) * (i.qty || 0), 0);
+        return (
+          <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.45)", zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center" }}>
+            <div style={{ background:"#fff", borderRadius:14, border:"1.5px solid #D4A96A", width:500, maxWidth:"92vw", padding:22 }}>
+              <div style={{ fontSize:15, fontWeight:700, color:"#2C1810", fontFamily:"Georgia", marginBottom:14 }}>⇌ Confirmer la fusion</div>
+              <div style={{ fontSize:12, color:"#9B7B5A", marginBottom:12 }}>
+                Les deux commandes suivantes seront <strong style={{color:"#C0392B"}}>supprimées</strong> et remplacées par une nouvelle commande fusionnée :
+              </div>
+              <div style={{ display:"flex", flexDirection:"column", gap:6, marginBottom:14 }}>
+                {[c1, c2].map(c => (
+                  <div key={c.id} style={{ padding:"8px 12px", background:"#FAF6F0", borderRadius:8, fontSize:12 }}>
+                    <strong style={{color:"#8B4513"}}>{c.id}</strong>
+                    <span style={{color:"#9B7B5A", marginLeft:8}}>{c.boulangerie} · {c.date} · {c.items} article(s) · {fmt(c.total)}</span>
+                  </div>
+                ))}
+              </div>
+              <div style={{ padding:"10px 12px", background:"#EAF3DE", borderRadius:8, fontSize:12, marginBottom:14 }}>
+                <strong style={{color:"#27500A"}}>Résultat :</strong>
+                <span style={{color:"#27500A", marginLeft:6}}>
+                  {mergedDetail.length} article(s) · Total {totalMerged.toFixed(2)} € HT · Date : {base.date}
+                </span>
+              </div>
+              <div style={{ display:"flex", justifyContent:"flex-end", gap:8 }}>
+                <button onClick={() => setShowFusionConfirm(false)}
+                  style={{ padding:"6px 14px", borderRadius:7, border:"1px solid #D4A96A", background:"#fff", color:"#8B4513", cursor:"pointer", fontSize:12 }}>
+                  Annuler
+                </button>
+                <button onClick={async () => {
+                  const fusionnee = {
+                    ...base,
+                    id: "CMD-F-" + Date.now(),
+                    items: mergedDetail.length,
+                    total: totalMerged,
+                    detail: mergedDetail,
+                    status: "En cours"
+                  };
+                  // Sauvegarder la fusionnée
+                  await onUpdateCommande(fusionnee);
+                  // Supprimer les deux originales via updateStatus Annulé puis filtrage
+                  // On utilise un statut spécial "Fusionné" pour les masquer
+                  await onUpdateStatus(c1.id, "Fusionné");
+                  await onUpdateStatus(c2.id, "Fusionné");
+                  setShowFusionConfirm(false);
+                  setFusionMode(false);
+                  setFusionSelection([]);
+                }}
+                  style={{ padding:"6px 14px", borderRadius:7, border:"none", background:"#27ae60", color:"#fff", fontWeight:700, fontSize:12, cursor:"pointer" }}>
+                  ✓ Confirmer la fusion
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Cartes commandes */}
       {filtered.length === 0 ? (
         <div style={{ textAlign:"center", padding:40, color:"#b89878" }}>Aucune commande.</div>
       ) : (
         <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-          {filtered.map(cmd => (
-            <div key={cmd.id} style={{
-              background:"#fff", borderRadius:12, border:"1.5px solid #EDD5B3",
-              boxShadow:"0 2px 10px rgba(139,69,19,.07)", overflow:"hidden"
-            }}>
+          {filtered.map(cmd => {
+            const isSelected = fusionSelection.includes(cmd.id);
+            return (
+            <div key={cmd.id}
+              onClick={fusionMode ? () => {
+                if (isSelected) setFusionSelection(prev => prev.filter(id => id !== cmd.id));
+                else if (fusionSelection.length < 2) setFusionSelection(prev => [...prev, cmd.id]);
+              } : undefined}
+              style={{
+                background:"#fff", borderRadius:12,
+                border: isSelected ? "2px solid #27ae60" : "1.5px solid #EDD5B3",
+                boxShadow: isSelected ? "0 0 0 3px #27ae6022" : "0 2px 10px rgba(139,69,19,.07)",
+                overflow:"hidden", cursor: fusionMode ? "pointer" : "default",
+                transition:"all .15s"
+              }}>
               {/* Bande colorée statut */}
-              <div style={{ height:4, background: statusColor[cmd.status] }} />
+              <div style={{ height:4, background: isSelected ? "#27ae60" : statusColor[cmd.status] }} />
+              {isSelected && (
+                <div style={{ background:"#27ae60", padding:"3px 14px", fontSize:11, fontWeight:700, color:"#fff" }}>
+                  ✓ Sélectionnée pour fusion
+                </div>
+              )}
 
               <div style={{ padding:"12px 14px" }}>
                 {/* Ligne 1 : ref + type + statut */}
