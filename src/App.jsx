@@ -1436,6 +1436,77 @@ function genererBonsFournisseurs(cmd, items) {
   });
 }
 
+function ModalSelectionFournisseurs({ items, cmd, onClose }) {
+  const fours = [...new Set(items.map(i => i.four || "Fournisseur non renseigné"))].sort();
+  const [selected, setSelected] = useState(new Set(fours));
+
+  const toggle = (f) => setSelected(prev => {
+    const next = new Set(prev);
+    next.has(f) ? next.delete(f) : next.add(f);
+    return next;
+  });
+
+  const handleGenerate = () => {
+    if (selected.size === 0) return;
+    const filteredItems = items.filter(i => selected.has(i.four || "Fournisseur non renseigné"));
+    genererBonsFournisseurs(cmd, filteredItems);
+    onClose();
+  };
+
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.55)", zIndex:1200, display:"flex", alignItems:"center", justifyContent:"center" }}>
+      <div style={{ background:"#fff", borderRadius:14, padding:28, width:420, maxWidth:"94vw", boxShadow:"0 8px 40px rgba(0,0,0,.3)", border:"2px solid #D4A96A" }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:18 }}>
+          <h3 style={{ margin:0, fontFamily:"Georgia", color:"#2C1810", fontSize:15 }}>📄 Sélectionner les fournisseurs</h3>
+          <button onClick={onClose} style={{ background:"none", border:"none", fontSize:20, cursor:"pointer", color:"#9B7B5A" }}>✕</button>
+        </div>
+        <div style={{ fontSize:11, color:"#9B7B5A", marginBottom:14 }}>
+          Cochez les fournisseurs pour lesquels générer un bon de commande PDF.
+        </div>
+        <div style={{ display:"flex", gap:8, marginBottom:14 }}>
+          <button onClick={() => setSelected(new Set(fours))} style={{ fontSize:11, padding:"4px 10px", borderRadius:6, border:"1px solid #D4A96A", background:"#fffaf5", color:"#8B4513", cursor:"pointer", fontWeight:700 }}>Tout sélectionner</button>
+          <button onClick={() => setSelected(new Set())} style={{ fontSize:11, padding:"4px 10px", borderRadius:6, border:"1px solid #ccc", background:"#fff", color:"#999", cursor:"pointer" }}>Tout désélectionner</button>
+        </div>
+        <div style={{ display:"flex", flexDirection:"column", gap:8, maxHeight:280, overflowY:"auto", marginBottom:20 }}>
+          {fours.map(f => {
+            const count = items.filter(i => (i.four || "Fournisseur non renseigné") === f).length;
+            const isSelected = selected.has(f);
+            return (
+              <label key={f} style={{
+                display:"flex", alignItems:"center", gap:12, padding:"10px 14px",
+                borderRadius:9, border:`2px solid ${isSelected ? "#8B4513" : "#EDD5B3"}`,
+                background: isSelected ? "#fffaf5" : "#fff",
+                cursor:"pointer", transition:"all .12s"
+              }}>
+                <input type="checkbox" checked={isSelected} onChange={() => toggle(f)}
+                  style={{ width:16, height:16, accentColor:"#8B4513", cursor:"pointer", flexShrink:0 }} />
+                <div style={{ flex:1 }}>
+                  <div style={{ fontSize:12, fontWeight:700, color:"#2C1810", fontFamily:"Georgia" }}>{f}</div>
+                  <div style={{ fontSize:10, color:"#9B7B5A", marginTop:2 }}>{count} produit{count > 1 ? "s" : ""}</div>
+                </div>
+                {isSelected && <span style={{ fontSize:13 }}>✅</span>}
+              </label>
+            );
+          })}
+        </div>
+        <div style={{ display:"flex", gap:10, justifyContent:"flex-end" }}>
+          <button onClick={onClose} style={{ padding:"9px 18px", borderRadius:9, border:"1.5px solid #D4A96A", background:"#fff", color:"#9B7B5A", cursor:"pointer", fontSize:12, fontWeight:600 }}>Annuler</button>
+          <button onClick={handleGenerate} disabled={selected.size === 0}
+            style={{
+              padding:"9px 20px", borderRadius:9, border:"none",
+              background: selected.size === 0 ? "#ccc" : "linear-gradient(135deg,#8B4513,#6B3210)",
+              color:"#fff", cursor: selected.size === 0 ? "default" : "pointer",
+              fontSize:12, fontWeight:700, fontFamily:"Georgia, serif",
+              boxShadow: selected.size > 0 ? "0 3px 12px rgba(139,69,19,.35)" : "none"
+            }}>
+            📄 Générer {selected.size > 0 ? `(${selected.size} fournisseur${selected.size > 1 ? "s" : ""})` : ""}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function DetailCommande({ cmd, onClose, onUpdateStatus, onUpdateCommande }) {
   let initialItems = [];
   try {
@@ -1445,6 +1516,7 @@ function DetailCommande({ cmd, onClose, onUpdateStatus, onUpdateCommande }) {
   const [items, setItems] = useState(initialItems);
   const [editingFour, setEditingFour] = useState(null);
   const [viewMode, setViewMode] = useState("liste"); // "liste" ou "fournisseur"
+  const [showModalFournisseurs, setShowModalFournisseurs] = useState(false);
   const statusColor = { "Livré": "#217346", "En cours": "#E67E22", "Annulé": "#C0392B" };
   const statuts = ["En cours", "Livré", "Annulé"];
   const [updating, setUpdating] = useState(false);
@@ -1468,6 +1540,7 @@ function DetailCommande({ cmd, onClose, onUpdateStatus, onUpdateCommande }) {
   };
 
   return (
+    <>
     <div style={{
       position:"fixed", inset:0, background:"rgba(0,0,0,.45)", zIndex:1000,
       display:"flex", alignItems:"center", justifyContent:"center"
@@ -1660,7 +1733,7 @@ function DetailCommande({ cmd, onClose, onUpdateStatus, onUpdateCommande }) {
                 const fours = [...new Set(items.map(i => i.four || "Non renseigné"))];
                 return <span style={{ fontSize:11, color:"#9B7B5A" }}>{fours.length} fournisseur(s) : {fours.join(", ")}</span>;
               })()}
-              <button onClick={() => genererBonsFournisseurs(cmd, items)}
+              <button onClick={() => setShowModalFournisseurs(true)}
                 style={{
                   display:"inline-flex", alignItems:"center", gap:6,
                   padding:"9px 18px", borderRadius:9, border:"none",
@@ -1679,6 +1752,14 @@ function DetailCommande({ cmd, onClose, onUpdateStatus, onUpdateCommande }) {
         )}
         </div>
     </div>
+    {showModalFournisseurs && items.length > 0 && (
+      <ModalSelectionFournisseurs
+        items={items}
+        cmd={cmd}
+        onClose={() => setShowModalFournisseurs(false)}
+      />
+    )}
+    </>
   );
 }
 function ModifierCommande({ cmd, onClose, onSave }) {
