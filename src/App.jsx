@@ -1255,17 +1255,31 @@ function genererBonsFournisseurs(cmd, items) {
     groupes[four].push(item);
   });
 
-  Object.entries(groupes).forEach(([fournisseur, produits]) => {
-    const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
-    const W = 210;
-    const marge = 18;
+  const entries = Object.entries(groupes);
+  if (entries.length === 0) return;
+
+  // Un seul PDF, une page par fournisseur (évite le blocage navigateur des téléchargements multiples)
+  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+  const W = 210;
+  const marge = 18;
+
+  const cols = [
+    { label: "Réf.",        x: marge + 2,   w: 22 },
+    { label: "Désignation", x: marge + 24,  w: 80 },
+    { label: "Cond.",       x: marge + 104, w: 22 },
+    { label: "Qté",         x: marge + 126, w: 14 },
+    { label: "P.U. HT",    x: marge + 140, w: 24 },
+    { label: "Total HT",   x: marge + 164, w: 10 },
+  ];
+
+  entries.forEach(([fournisseur, produits], idx) => {
+    if (idx > 0) doc.addPage();
     let y = 0;
 
     // ── Fond header ──
     doc.setFillColor(44, 24, 16);
     doc.rect(0, 0, W, 42, "F");
 
-    // Logo texte (le vrai logo nécessiterait une conversion base64)
     doc.setTextColor(212, 169, 106);
     doc.setFontSize(22);
     doc.setFont("helvetica", "bold");
@@ -1276,7 +1290,6 @@ function genererBonsFournisseurs(cmd, items) {
     doc.setTextColor(180, 140, 90);
     doc.text("BOULANGERIE — PÂTISSERIE", marge, 22);
 
-    // Boulangerie commandante
     doc.setFontSize(11);
     doc.setTextColor(255, 255, 255);
     doc.setFont("helvetica", "bold");
@@ -1339,14 +1352,6 @@ function genererBonsFournisseurs(cmd, items) {
     doc.setTextColor(212, 169, 106);
     doc.setFontSize(8);
     doc.setFont("helvetica", "bold");
-    const cols = [
-      { label: "Réf.",      x: marge + 2,   w: 22 },
-      { label: "Désignation", x: marge + 24, w: 80 },
-      { label: "Cond.",     x: marge + 104,  w: 22 },
-      { label: "Qté",       x: marge + 126,  w: 14 },
-      { label: "P.U. HT",   x: marge + 140,  w: 24 },
-      { label: "Total HT",  x: marge + 164,  w: 10 },
-    ];
     cols.forEach(c => doc.text(c.label, c.x, y + 5.5));
     y += 8;
 
@@ -1355,7 +1360,6 @@ function genererBonsFournisseurs(cmd, items) {
     let totalHT = 0;
     produits.forEach((item, i) => {
       const rowH = 7;
-      // alternance
       if (i % 2 === 0) {
         doc.setFillColor(255, 250, 245);
         doc.rect(marge, y, W - marge * 2, rowH, "F");
@@ -1364,25 +1368,24 @@ function genererBonsFournisseurs(cmd, items) {
       doc.setLineWidth(0.2);
       doc.line(marge, y + rowH, W - marge, y + rowH);
 
-      const ligneHT = item.prix_ht * item.qty;
+      const ligneHT = (item.prix_ht || 0) * (item.qty || 1);
       totalHT += ligneHT;
 
       doc.setTextColor(44, 24, 16);
       doc.setFontSize(7.5);
-      doc.text(item.ref || "—",                   cols[0].x, y + 4.8);
-      doc.text(item.name.substring(0, 45),        cols[1].x, y + 4.8);
-      doc.text(item.unit || "—",                  cols[2].x, y + 4.8);
+      doc.text(item.ref || "—",                cols[0].x, y + 4.8);
+      doc.text((item.name || "").substring(0, 45), cols[1].x, y + 4.8);
+      doc.text(String(item.unit || "—"),       cols[2].x, y + 4.8);
       doc.setFont("helvetica", "bold");
-      doc.text(String(item.qty),                  cols[3].x, y + 4.8);
+      doc.text(String(item.qty || 1),          cols[3].x, y + 4.8);
       doc.setFont("helvetica", "normal");
-      doc.text(fmt(item.prix_ht),                 cols[4].x, y + 4.8);
+      doc.text(fmt(item.prix_ht || 0),         cols[4].x, y + 4.8);
       doc.setFont("helvetica", "bold");
-      doc.text(fmt(ligneHT),                      cols[5].x, y + 4.8);
+      doc.text(fmt(ligneHT),                   cols[5].x, y + 4.8);
       doc.setFont("helvetica", "normal");
 
       y += rowH;
 
-      // Nouvelle page si besoin
       if (y > 265) {
         doc.addPage();
         y = 20;
@@ -1429,11 +1432,11 @@ function genererBonsFournisseurs(cmd, items) {
       `Document généré le ${new Date().toLocaleDateString("fr-FR")} — Pense Au Pain`,
       W / 2, 290, { align: "center" }
     );
-
-    // Téléchargement
-    const nomFichier = `bon-commande_${cmd.id}_${fournisseur.replace(/\s+/g, "-")}.pdf`;
-    doc.save(nomFichier);
   });
+
+  // Un seul save = un seul téléchargement, pas de blocage navigateur
+  const nomFichier = `bons-commande_${cmd.id}.pdf`;
+  doc.save(nomFichier);
 }
 
 function ModalSelectionFournisseurs({ items, cmd, onClose }) {
