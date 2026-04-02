@@ -875,13 +875,100 @@ function MobileCartBar({ cart, boulangerieId, setCart, addToHistory }) {
   );
 }
 
-function TabCommande({ cart, setCart, boulangerieId, addToHistory, produits, setProduits, favoris, toggleFavori, history }) {
+function ModalTriFavoris({ favoris, produits, onSave, onClose }) {
+  const [ordre, setOrdre] = useState([...favoris]);
+  const [dragging, setDragging] = useState(null);
+  const [dragOver, setDragOver] = useState(null);
+
+  const getProductName = (key) => {
+    const p = produits.find(p => ((p.ref && p.name) ? `${p.ref}__${p.name}` : (p.ref || p.name)) === key);
+    return p ? p.name : key;
+  };
+
+  const handleDragStart = (e, idx) => {
+    setDragging(idx);
+    e.dataTransfer.effectAllowed = "move";
+  };
+
+  const handleDragOver = (e, idx) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    if (idx !== dragging) setDragOver(idx);
+  };
+
+  const handleDrop = (e, idx) => {
+    e.preventDefault();
+    if (dragging === null || dragging === idx) return;
+    const newOrdre = [...ordre];
+    const [moved] = newOrdre.splice(dragging, 1);
+    newOrdre.splice(idx, 0, moved);
+    setOrdre(newOrdre);
+    setDragging(null);
+    setDragOver(null);
+  };
+
+  const moveUp   = (idx) => { if (idx === 0) return; const a = [...ordre]; [a[idx-1], a[idx]] = [a[idx], a[idx-1]]; setOrdre(a); };
+  const moveDown = (idx) => { if (idx === ordre.length-1) return; const a = [...ordre]; [a[idx], a[idx+1]] = [a[idx+1], a[idx]]; setOrdre(a); };
+
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.55)", zIndex:1300, display:"flex", alignItems:"center", justifyContent:"center" }}>
+      <div style={{ background:"#fff", borderRadius:14, padding:28, width:460, maxWidth:"95vw", maxHeight:"88vh", display:"flex", flexDirection:"column", boxShadow:"0 8px 40px rgba(0,0,0,.3)", border:"2px solid #D4A96A" }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
+          <h3 style={{ margin:0, fontFamily:"Georgia", color:"#2C1810", fontSize:15 }}>⭐ Trier mes favoris</h3>
+          <button onClick={onClose} style={{ background:"none", border:"none", fontSize:20, cursor:"pointer", color:"#9B7B5A" }}>✕</button>
+        </div>
+        <div style={{ fontSize:11, color:"#9B7B5A", marginBottom:14 }}>
+          Glissez-déposez ou utilisez les flèches ↑↓ pour changer l'ordre d'affichage.
+        </div>
+        <div style={{ flex:1, overflowY:"auto", display:"flex", flexDirection:"column", gap:6, marginBottom:16 }}>
+          {ordre.map((key, idx) => (
+            <div key={key}
+              draggable
+              onDragStart={e => handleDragStart(e, idx)}
+              onDragOver={e => handleDragOver(e, idx)}
+              onDrop={e => handleDrop(e, idx)}
+              onDragEnd={() => { setDragging(null); setDragOver(null); }}
+              style={{
+                display:"flex", alignItems:"center", gap:10,
+                padding:"9px 12px", borderRadius:9,
+                border: dragOver === idx ? "2px solid #8B4513" : "1.5px solid #EDD5B3",
+                background: dragging === idx ? "#fffaf5" : dragOver === idx ? "#FFF3E0" : "#fff",
+                cursor:"grab", transition:"all .1s",
+                opacity: dragging === idx ? 0.5 : 1,
+                boxShadow: dragging === idx ? "0 4px 16px rgba(139,69,19,.2)" : "none",
+              }}>
+              <span style={{ color:"#D4A96A", fontSize:16, cursor:"grab", flexShrink:0 }}>⠿</span>
+              <span style={{ fontSize:11, fontWeight:600, color:"#8B4513", flexShrink:0, minWidth:20, textAlign:"right" }}>{idx+1}.</span>
+              <span style={{ flex:1, fontSize:12, color:"#2C1810", fontWeight:600, lineHeight:1.3 }}>{getProductName(key)}</span>
+              <div style={{ display:"flex", flexDirection:"column", gap:2, flexShrink:0 }}>
+                <button onClick={() => moveUp(idx)} disabled={idx === 0}
+                  style={{ background:"none", border:"1px solid #EDD5B3", borderRadius:4, width:22, height:18, cursor: idx===0 ? "default":"pointer", color: idx===0 ? "#ccc":"#8B4513", fontSize:10, lineHeight:1, padding:0 }}>▲</button>
+                <button onClick={() => moveDown(idx)} disabled={idx === ordre.length-1}
+                  style={{ background:"none", border:"1px solid #EDD5B3", borderRadius:4, width:22, height:18, cursor: idx===ordre.length-1 ? "default":"pointer", color: idx===ordre.length-1 ? "#ccc":"#8B4513", fontSize:10, lineHeight:1, padding:0 }}>▼</button>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div style={{ display:"flex", gap:10, justifyContent:"flex-end" }}>
+          <button onClick={onClose} style={{ padding:"9px 18px", borderRadius:9, border:"1.5px solid #D4A96A", background:"#fff", color:"#9B7B5A", cursor:"pointer", fontSize:12, fontWeight:600 }}>Annuler</button>
+          <button onClick={() => { onSave(ordre); onClose(); }}
+            style={{ padding:"9px 20px", borderRadius:9, border:"none", background:"linear-gradient(135deg,#8B4513,#6B3210)", color:"#fff", cursor:"pointer", fontSize:12, fontWeight:700, fontFamily:"Georgia, serif", boxShadow:"0 3px 12px rgba(139,69,19,.35)" }}>
+            ✓ Enregistrer l'ordre
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TabCommande({ cart, setCart, boulangerieId, addToHistory, produits, setProduits, favoris, toggleFavori, reordonnerFavoris, history }) {
   const [search, setSearch] = useState("");
   const [filterCat, setFilterCat] = useState("Tous");
   const [showModal, setShowModal] = useState(false);
   const [importMsg, setImportMsg] = useState(null);
   const [qtys, setQtys] = useState({});
   const [showPrixFour, setShowPrixFour] = useState(null);
+  const [showTriFavoris, setShowTriFavoris] = useState(false);
 
   // Moyenne des quantités commandées sur les 4 dernières semaines
   const moyennes = useMemo(() => {
@@ -919,7 +1006,7 @@ function TabCommande({ cart, setCart, boulangerieId, addToHistory, produits, set
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
-    return produits.filter(p => {
+    const liste = produits.filter(p => {
       const mSearch = !q || p.name.toLowerCase().includes(q) || p.ref.toLowerCase().includes(q);
       const pKey = (p.ref && p.name) ? `${p.ref}__${p.name}` : (p.ref || p.name);
       const mCat = filterCat === "Tous" ? true
@@ -927,6 +1014,14 @@ function TabCommande({ cart, setCart, boulangerieId, addToHistory, produits, set
                  : p.cat === filterCat;
       return mSearch && mCat;
     });
+    if (filterCat === "⭐ Favoris") {
+      liste.sort((a, b) => {
+        const keyA = (a.ref && a.name) ? `${a.ref}__${a.name}` : (a.ref || a.name);
+        const keyB = (b.ref && b.name) ? `${b.ref}__${b.name}` : (b.ref || b.name);
+        return favoris.indexOf(keyA) - favoris.indexOf(keyB);
+      });
+    }
+    return liste;
   }, [search, filterCat, produits, favoris]);
 
   const handleImportMercuriale = async (e) => {
@@ -1079,6 +1174,20 @@ function TabCommande({ cart, setCart, boulangerieId, addToHistory, produits, set
               ({favoris.length})
             </span>
           </button>
+          {favoris.length > 1 && (
+            <button onClick={() => setShowTriFavoris(true)}
+              title="Modifier l'ordre des favoris"
+              style={{
+                padding:"4px 10px", borderRadius:16, border:"1px solid #F5A623",
+                background:"#FFFDE7", color:"#B8860B", cursor:"pointer", fontSize:11,
+                fontWeight:700, display:"flex", alignItems:"center", gap:3, transition:"all .15s"
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background="#F5A623"; e.currentTarget.style.color="#fff"; }}
+              onMouseLeave={e => { e.currentTarget.style.background="#FFFDE7"; e.currentTarget.style.color="#B8860B"; }}
+            >
+              ↕ Trier
+            </button>
+          )}
           {CATEGORIES.map(c => (
             <button key={c} onClick={() => setFilterCat(c)}
               style={{
@@ -1235,6 +1344,14 @@ function TabCommande({ cart, setCart, boulangerieId, addToHistory, produits, set
 
     {/* Barre panier fixe mobile */}
     <MobileCartBar cart={cart} boulangerieId={boulangerieId} setCart={setCart} addToHistory={addToHistory} />
+    {showTriFavoris && (
+      <ModalTriFavoris
+        favoris={favoris}
+        produits={produits}
+        onSave={reordonnerFavoris}
+        onClose={() => setShowTriFavoris(false)}
+      />
+    )}
     </>
   );
 }
@@ -3736,6 +3853,13 @@ export default function App() {
     } catch(e) { console.error("Erreur sauvegarde favoris", e); }
   };
 
+  const reordonnerFavoris = async (nouvelOrdre) => {
+    setFavoris(nouvelOrdre);
+    try {
+      await postToSheets(SHEETS_URL, { action: "saveFavoris", boulangerieId: boulangerieId, favoris: nouvelOrdre });
+    } catch(e) { console.error("Erreur sauvegarde ordre favoris", e); }
+  };
+
   // ── Brouillon panier matières premières ──
   const [brouillon, setBrouillon] = useState(null);
 
@@ -4076,7 +4200,7 @@ export default function App() {
       <div className="pap-content">
         <div className="pap-card-inner" style={{ background:"#fff", borderRadius:14, boxShadow:"0 2px 14px rgba(139,69,19,.07)", border:"1px solid #EDD5B3", minHeight:400 }}>
           {tab==="dashboard"   && <TabDashboard history={historyVisible} />}
-          {tab==="commande"    && <TabCommande cart={cart} setCart={setCartWithSave} boulangerieId={boulangerieId} addToHistory={addToHistory} produits={produits} setProduits={setProduits} favoris={favoris} toggleFavori={toggleFavori} history={history} />}
+          {tab==="commande"    && <TabCommande cart={cart} setCart={setCartWithSave} boulangerieId={boulangerieId} addToHistory={addToHistory} produits={produits} setProduits={setProduits} favoris={favoris} toggleFavori={toggleFavori} reordonnerFavoris={reordonnerFavoris} history={history} />}
           {tab==="emballages"  && <TabEmballages emballages={emballages} boulangerieId={boulangerieId} isAdmin={isAdmin} onAjouter={ajouterEmballage} onModifierStock={modifierStockEmb} onCommander={passerCommandeEmb} />}
           {tab==="patisserie"  && <TabPatisserie boulangerieId={boulangerieId} compte={compte} isAdmin={isAdmin} />}
           {tab==="coutmatiere" && <TabCoutMatiere boulangerieId={boulangerieId} isAdmin={isAdmin} produits={produits} />}
