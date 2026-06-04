@@ -693,16 +693,13 @@ function CartPanel({ cart, setCart, boulangerieId, addToHistory }) {
 // ─── MODAL PRODUIT LIBRE ──────────────────────────────────────────────────────
 function ModalProduitLibre({ onClose, onAdd }) {
   const [nom, setNom] = useState("");
-  const [prix, setPrix] = useState("");
   const [qty, setQty] = useState(1);
   const [unite, setUnite] = useState("");
   const [erreur, setErreur] = useState("");
 
   const handleAdd = () => {
     if (!nom.trim()) { setErreur("Le nom est obligatoire."); return; }
-    const p = parseFloat(prix.replace(",", "."));
-    if (isNaN(p) || p <= 0) { setErreur("Indiquez un prix valide (ex: 12.50)."); return; }
-    onAdd({ ref: "", name: nom.trim(), unit: unite.trim() || "—", prix_ht: p, tva: 0.055, cat: "Hors mercuriale", qty });
+    onAdd({ ref: "", name: nom.trim(), unit: unite.trim() || "—", prix_ht: 0, tva: 0.055, cat: "Hors mercuriale", qty });
     onClose();
   };
 
@@ -722,7 +719,6 @@ function ModalProduitLibre({ onClose, onAdd }) {
         background: "#fff", borderRadius: 16, padding: 28, width: 420, maxWidth: "90vw",
         boxShadow: "0 8px 40px rgba(0,0,0,.25)", border: "2px solid #D4A96A"
       }}>
-        {/* Header */}
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:20 }}>
           <div>
             <h3 style={{ margin:0, fontFamily:"Georgia", color:"#2C1810", fontSize:16 }}>✏️ Produit hors mercuriale</h3>
@@ -731,7 +727,6 @@ function ModalProduitLibre({ onClose, onAdd }) {
           <button onClick={onClose} style={{ background:"none", border:"none", fontSize:20, cursor:"pointer", color:"#9B7B5A", lineHeight:1 }}>✕</button>
         </div>
 
-        {/* Champs */}
         <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
           <div>
             <label style={labelStyle}>Désignation du produit *</label>
@@ -739,19 +734,11 @@ function ModalProduitLibre({ onClose, onAdd }) {
               placeholder="Ex: Beurre extra-fin 500g"
               style={inputStyle} autoFocus />
           </div>
-          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
-            <div>
-              <label style={labelStyle}>Prix HT (€) *</label>
-              <input value={prix} onChange={e => { setPrix(e.target.value); setErreur(""); }}
-                placeholder="Ex: 12.50"
-                style={inputStyle} />
-            </div>
-            <div>
-              <label style={labelStyle}>Conditionnement</label>
-              <input value={unite} onChange={e => setUnite(e.target.value)}
-                placeholder="Ex: Sac 5kg"
-                style={inputStyle} />
-            </div>
+          <div>
+            <label style={labelStyle}>Conditionnement</label>
+            <input value={unite} onChange={e => setUnite(e.target.value)}
+              placeholder="Ex: Sac 5kg"
+              style={inputStyle} />
           </div>
           <div>
             <label style={labelStyle}>Quantité</label>
@@ -764,21 +751,9 @@ function ModalProduitLibre({ onClose, onAdd }) {
               <span style={{ fontSize:11, color:"#9B7B5A", marginLeft:4 }}>unité(s)</span>
             </div>
           </div>
-
-          {/* Aperçu prix */}
-          {prix && !isNaN(parseFloat(prix.replace(",","."))) && parseFloat(prix.replace(",",".")) > 0 && (
-            <div style={{ background:"#fffaf5", border:"1px solid #EDD5B3", borderRadius:8, padding:"10px 14px", display:"flex", justifyContent:"space-between" }}>
-              <span style={{ fontSize:11, color:"#7A5C3A" }}>Total TTC estimé ×{qty}</span>
-              <span style={{ fontWeight:700, color:"#2C1810", fontSize:13 }}>
-                {fmt(parseFloat(prix.replace(",",".")) * 1.055 * qty)}
-              </span>
-            </div>
-          )}
-
           {erreur && <p style={{ margin:0, color:"#c0392b", fontSize:12, fontWeight:600 }}>⚠ {erreur}</p>}
         </div>
 
-        {/* Boutons */}
         <div style={{ display:"flex", gap:10, marginTop:20 }}>
           <button onClick={onClose}
             style={{ flex:1, padding:"10px 0", border:"2px solid #D4A96A", borderRadius:9, background:"#fff", color:"#8B4513", cursor:"pointer", fontWeight:700, fontSize:12, fontFamily:"Georgia" }}>
@@ -1930,6 +1905,10 @@ function ModifierCommande({ cmd, onClose, onSave }) {
   const [boulangerie, setBoulangerie] = useState(cmd.boulangerie);
   const [search, setSearch] = useState("");
   const [saving, setSaving] = useState(false);
+  const [horsNom, setHorsNom] = useState("");
+  const [horsUnite, setHorsUnite] = useState("");
+  const [horsQty, setHorsQty] = useState(1);
+  const [showHors, setShowHors] = useState(false);
 
   const totalTTC = items.reduce((s, i) => s + i.prix_ht * (1 + (i.tva || 0.055)) * i.qty, 0);
   const removeItem = (key) => setItems(prev => prev.filter(i => (i.ref || i.name) !== key));
@@ -1945,6 +1924,12 @@ function ModifierCommande({ cmd, onClose, onSave }) {
     : [];
 
   const addProduct = (p) => { setItems(prev => [...prev, { ...p, qty: 1 }]); setSearch(""); };
+
+  const addHorsMercuriale = () => {
+    if (!horsNom.trim()) return;
+    setItems(prev => [...prev, { ref:"", name: horsNom.trim(), unit: horsUnite.trim() || "—", prix_ht: 0, tva: 0.055, cat:"Hors mercuriale", qty: horsQty }]);
+    setHorsNom(""); setHorsUnite(""); setHorsQty(1); setShowHors(false);
+  };
 
   const handleSave = async () => {
     if (items.length === 0) return;
@@ -1995,6 +1980,39 @@ function ModifierCommande({ cmd, onClose, onSave }) {
                   <span style={{ fontSize:11, color:"#9B7B5A" }}>{fmt(p.prix_ht)} HT · {p.four}</span>
                 </div>
               ))}
+            </div>
+          )}
+        </div>
+
+        {/* Produit hors mercuriale */}
+        <div style={{ marginBottom:14 }}>
+          <button onClick={() => setShowHors(v => !v)}
+            style={{ fontSize:11, fontWeight:700, color:"#8B4513", background:"#fffaf5", border:"1.5px dashed #D4A96A", borderRadius:7, padding:"5px 12px", cursor:"pointer" }}>
+            {showHors ? "✕ Annuler" : "✏️ Ajouter un produit hors mercuriale"}
+          </button>
+          {showHors && (
+            <div style={{ marginTop:10, display:"flex", gap:8, flexWrap:"wrap", alignItems:"flex-end", background:"#fffaf5", border:"1.5px solid #D4A96A", borderRadius:9, padding:"12px 14px" }}>
+              <div style={{ flex:2, minWidth:140 }}>
+                <div style={{ fontSize:10, fontWeight:700, color:"#7A5C3A", marginBottom:3 }}>Désignation *</div>
+                <input value={horsNom} onChange={e => setHorsNom(e.target.value)}
+                  placeholder="Ex: Produit spécial"
+                  style={{ width:"100%", padding:"7px 10px", border:"1.5px solid #D4A96A", borderRadius:7, fontSize:12, outline:"none", background:"#fff", boxSizing:"border-box" }} />
+              </div>
+              <div style={{ flex:1, minWidth:100 }}>
+                <div style={{ fontSize:10, fontWeight:700, color:"#7A5C3A", marginBottom:3 }}>Conditionnement</div>
+                <input value={horsUnite} onChange={e => setHorsUnite(e.target.value)}
+                  placeholder="Ex: Sac 5kg"
+                  style={{ width:"100%", padding:"7px 10px", border:"1.5px solid #D4A96A", borderRadius:7, fontSize:12, outline:"none", background:"#fff", boxSizing:"border-box" }} />
+              </div>
+              <div style={{ display:"flex", alignItems:"center", gap:4 }}>
+                <button onClick={() => setHorsQty(q => Math.max(1, q-1))} style={{ width:26, height:26, borderRadius:6, border:"1px solid #D4A96A", background:"#fff", cursor:"pointer", fontSize:14 }}>−</button>
+                <span style={{ width:28, textAlign:"center", fontSize:13, fontWeight:700, color:"#2C1810" }}>{horsQty}</span>
+                <button onClick={() => setHorsQty(q => q+1)} style={{ width:26, height:26, borderRadius:6, border:"1px solid #D4A96A", background:"#fff", cursor:"pointer", fontSize:14 }}>+</button>
+              </div>
+              <button onClick={addHorsMercuriale} disabled={!horsNom.trim()}
+                style={{ padding:"7px 14px", borderRadius:7, border:"none", background: horsNom.trim() ? "linear-gradient(135deg,#8B4513,#6B3210)" : "#ccc", color:"#fff", cursor: horsNom.trim() ? "pointer":"default", fontSize:11, fontWeight:700 }}>
+                + Ajouter
+              </button>
             </div>
           )}
         </div>
