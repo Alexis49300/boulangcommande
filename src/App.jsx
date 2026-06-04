@@ -1300,52 +1300,55 @@ function TabCommande({ cart, setCart, boulangerieId, addToHistory, produits, set
                     }
                   </div>
                 )}
-                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginTop:4, gap:6 }}>
-                  <div style={{ display:"flex", flexDirection:"column", gap:2 }}>
-                    <div style={{ fontSize:13, fontWeight:700, color:"#2C1810" }}>{Number(product.prix_ht).toFixed(2)} € <span style={{ fontSize:10, color:"#9B7B5A", fontWeight:400 }}>HT</span></div>
-                    <div style={{ fontSize:10, color:"#9B7B5A" }}>{(product.prix_ht * (1 + product.tva)).toFixed(2)} € TTC</div>
+                <div style={{ display:"flex", flexDirection:"column", gap:6, marginTop:4 }}>
+                  {/* Ligne 1 : prix + bouton tarifs */}
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                    <div style={{ display:"flex", flexDirection:"column", gap:1 }}>
+                      <div style={{ fontSize:13, fontWeight:700, color:"#2C1810" }}>{Number(product.prix_ht).toFixed(2)} € <span style={{ fontSize:10, color:"#9B7B5A", fontWeight:400 }}>HT</span></div>
+                      <div style={{ fontSize:10, color:"#9B7B5A" }}>{(product.prix_ht * (1 + product.tva)).toFixed(2)} € TTC</div>
+                    </div>
+                    {product.prix_fournisseurs && Object.keys(product.prix_fournisseurs).length > 0 && (
+                      <button onClick={() => setShowPrixFour(showPrixFour === key ? null : key)}
+                        title="Voir les tarifs de tous les fournisseurs"
+                        style={{
+                          padding:"3px 8px", borderRadius:6, border:"1px solid #D4A96A",
+                          background: showPrixFour === key ? "#8B4513" : "#fffaf5",
+                          color: showPrixFour === key ? "#fff" : "#8B4513",
+                          cursor:"pointer", fontSize:10, fontWeight:700, whiteSpace:"nowrap"
+                        }}>
+                        {showPrixFour === key ? "✕ Fermer" : "📊 Tarifs"}
+                      </button>
+                    )}
                   </div>
-                  {product.prix_fournisseurs && Object.keys(product.prix_fournisseurs).length > 0 && (
-                    <button onClick={() => setShowPrixFour(showPrixFour === key ? null : key)}
-                      title="Voir les tarifs de tous les fournisseurs"
-                      style={{
-                        padding:"3px 8px", borderRadius:6, border:"1px solid #D4A96A",
-                        background: showPrixFour === key ? "#8B4513" : "#fffaf5",
-                        color: showPrixFour === key ? "#fff" : "#8B4513",
-                        cursor:"pointer", fontSize:10, fontWeight:700, whiteSpace:"nowrap"
-                      }}>
-                      {showPrixFour === key ? "✕ Fermer" : "📊 Tarifs"}
-                    </button>
-                  )}
-                  <div style={{ display:"flex", alignItems:"center", gap:4, flexShrink:0 }}>
+                  {/* Ligne 2 : conditionnement + quantité + ajouter */}
+                  <div style={{ display:"flex", alignItems:"center", gap:4, flexWrap:"wrap" }}>
                     {inCart ? (
                       <button onClick={() => setCart(prev => prev.filter(x => ((x.ref&&x.name)?`${x.ref}__${x.name}`:(x.ref||x.name)) !== key))}
-                        style={{ padding:"5px 10px", borderRadius:7, background:"linear-gradient(135deg,#8B4513,#6B3210)", color:"#fff", border:"none", cursor:"pointer", fontSize:11, fontWeight:700 }}>
+                        style={{ flex:1, padding:"6px 10px", borderRadius:7, background:"linear-gradient(135deg,#8B4513,#6B3210)", color:"#fff", border:"none", cursor:"pointer", fontSize:11, fontWeight:700, textAlign:"center" }}>
                         ✓ ×{inCart.qty}{inCart.cond_label ? ` ${inCart.cond_label}` : ""} — Retirer
                       </button>
                     ) : (
                       <>
-                        {/* Sélecteur conditionnement si cond_carton défini */}
                         {product.cond_carton && product.cond_carton > 1 && (
                           <select
                             value={condModes[key] || "unite"}
                             onChange={e => setCondModes(m => ({...m, [key]: e.target.value}))}
                             style={{
-                              padding:"3px 6px", borderRadius:6, border:"1px solid #D4A96A",
-                              background:"#fffaf5", color:"#8B4513", fontSize:10, fontWeight:700,
-                              cursor:"pointer"
+                              flex:1, minWidth:0, padding:"4px 5px", borderRadius:6,
+                              border:"1px solid #D4A96A", background:"#fffaf5",
+                              color:"#8B4513", fontSize:10, fontWeight:700, cursor:"pointer"
                             }}>
-                            <option value="unite">À l'unité</option>
+                            <option value="unite">Unité</option>
                             <option value="carton">Carton ×{product.cond_carton}</option>
                           </select>
                         )}
                         <button onClick={() => setQtys(q => ({...q, [key]: Math.max(1,(q[key]||1)-1)}))}
-                          style={{ padding:"3px 8px", borderRadius:6, border:"1px solid #D4A96A", background:"#fff", cursor:"pointer", fontSize:14, lineHeight:1 }}>−</button>
+                          style={{ padding:"4px 9px", borderRadius:6, border:"1px solid #D4A96A", background:"#fff", cursor:"pointer", fontSize:14, lineHeight:1, flexShrink:0 }}>−</button>
                         <input type="number" value={qtys[key]||1} min="1"
                           onChange={e => setQtys(q => ({...q, [key]: Math.max(1,parseInt(e.target.value)||1)}))}
-                          style={{ width:44, textAlign:"center", padding:"3px 4px", border:"1px solid #D4A96A", borderRadius:6, fontSize:12, fontWeight:700, color:"#2C1810", background:"#fffaf5" }}/>
+                          style={{ width:38, textAlign:"center", padding:"3px 2px", border:"1px solid #D4A96A", borderRadius:6, fontSize:12, fontWeight:700, color:"#2C1810", background:"#fffaf5", flexShrink:0 }}/>
                         <button onClick={() => setQtys(q => ({...q, [key]: (q[key]||1)+1}))}
-                          style={{ padding:"3px 8px", borderRadius:6, border:"1px solid #D4A96A", background:"#fff", cursor:"pointer", fontSize:14, lineHeight:1 }}>+</button>
+                          style={{ padding:"4px 9px", borderRadius:6, border:"1px solid #D4A96A", background:"#fff", cursor:"pointer", fontSize:14, lineHeight:1, flexShrink:0 }}>+</button>
                         <button onClick={() => {
                           const rawQty = qtys[key] || 1;
                           const mode = condModes[key] || "unite";
@@ -1354,7 +1357,7 @@ function TabCommande({ cart, setCart, boulangerieId, addToHistory, produits, set
                           const condLabel = isCarton ? `carton×${product.cond_carton}` : null;
                           addToCart({ ...product, ...(condLabel ? { cond_label: condLabel } : {}) }, finalQty);
                         }}
-                          style={{ padding:"5px 10px", borderRadius:7, background:"linear-gradient(135deg,#C4874A,#8B4513)", color:"#fff", border:"none", cursor:"pointer", fontSize:11, fontWeight:700 }}>
+                          style={{ flex:1, minWidth:0, padding:"6px 8px", borderRadius:7, background:"linear-gradient(135deg,#C4874A,#8B4513)", color:"#fff", border:"none", cursor:"pointer", fontSize:11, fontWeight:700, textAlign:"center" }}>
                           + Ajouter
                         </button>
                       </>
