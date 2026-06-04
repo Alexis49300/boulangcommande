@@ -2648,6 +2648,318 @@ function TabHistorique({ history, onUpdateStatus, onUpdateCommande, onAddCommand
   );
 }
 
+// ─── TAB LITIGES ─────────────────────────────────────────────────────────────
+
+const LITIGE_TYPES = [
+  "Non-conformité produit",
+  "Erreur de livraison",
+  "Demande de retour / avoir",
+  "Litige facture / prix",
+];
+const LITIGE_STATUTS = ["Ouvert", "En cours", "Résolu"];
+const LITIGE_STATUT_COLORS = { "Ouvert": "#C0392B", "En cours": "#E67E22", "Résolu": "#217346" };
+
+function ModalNouveauLitige({ fournisseurs, boulangerie, onSave, onClose }) {
+  const [type, setType] = useState(LITIGE_TYPES[0]);
+  const [four, setFour] = useState(fournisseurs[0] || "");
+  const [description, setDescription] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
+    if (!description.trim()) return;
+    setSaving(true);
+    const litige = {
+      id: "LIT-" + Date.now(),
+      date: new Date().toLocaleDateString("fr-FR"),
+      boulangerie,
+      type,
+      fournisseur: four,
+      description: description.trim(),
+      status: "Ouvert",
+      commentaires: [],
+    };
+    await onSave(litige);
+    onClose();
+  };
+
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.5)", zIndex:1200, display:"flex", alignItems:"center", justifyContent:"center" }}>
+      <div style={{ background:"#fff", borderRadius:14, padding:28, width:500, maxWidth:"94vw", boxShadow:"0 8px 40px rgba(0,0,0,.25)", border:"2px solid #D4A96A" }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:20 }}>
+          <h3 style={{ margin:0, fontFamily:"Georgia", color:"#2C1810", fontSize:16 }}>⚠️ Nouveau litige</h3>
+          <button onClick={onClose} style={{ background:"none", border:"none", fontSize:20, cursor:"pointer", color:"#9B7B5A" }}>✕</button>
+        </div>
+        <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+          <div>
+            <label style={{ fontSize:11, fontWeight:700, color:"#8B4513", display:"block", marginBottom:4 }}>Type de litige</label>
+            <select value={type} onChange={e => setType(e.target.value)}
+              style={{ width:"100%", padding:"8px 12px", borderRadius:8, border:"1.5px solid #D4A96A", background:"#fffaf5", color:"#2C1810", fontSize:12, outline:"none" }}>
+              {LITIGE_TYPES.map(t => <option key={t}>{t}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={{ fontSize:11, fontWeight:700, color:"#8B4513", display:"block", marginBottom:4 }}>Fournisseur concerné</label>
+            <select value={four} onChange={e => setFour(e.target.value)}
+              style={{ width:"100%", padding:"8px 12px", borderRadius:8, border:"1.5px solid #D4A96A", background:"#fffaf5", color:"#2C1810", fontSize:12, outline:"none" }}>
+              {fournisseurs.map(f => <option key={f}>{f}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={{ fontSize:11, fontWeight:700, color:"#8B4513", display:"block", marginBottom:4 }}>Description du problème</label>
+            <textarea value={description} onChange={e => setDescription(e.target.value)}
+              rows={4} placeholder="Décrivez le problème en détail…"
+              style={{ width:"100%", padding:"8px 12px", borderRadius:8, border:"1.5px solid #D4A96A", background:"#fffaf5", color:"#2C1810", fontSize:12, outline:"none", resize:"vertical", boxSizing:"border-box", fontFamily:"inherit" }} />
+          </div>
+        </div>
+        <div style={{ display:"flex", gap:10, justifyContent:"flex-end", marginTop:20 }}>
+          <button onClick={onClose} style={{ padding:"9px 18px", borderRadius:9, border:"1.5px solid #D4A96A", background:"#fff", color:"#9B7B5A", cursor:"pointer", fontSize:12, fontWeight:600 }}>Annuler</button>
+          <button onClick={handleSave} disabled={!description.trim() || saving}
+            style={{ padding:"9px 20px", borderRadius:9, border:"none", background: description.trim() ? "linear-gradient(135deg,#C0392B,#922B21)" : "#ccc", color:"#fff", cursor: description.trim() ? "pointer" : "default", fontSize:12, fontWeight:700, fontFamily:"Georgia, serif" }}>
+            {saving ? "⏳ Enregistrement…" : "⚠️ Déclarer le litige"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ModalDetailLitige({ litige, onClose, onUpdateStatus, onAddCommentaire }) {
+  const [newComment, setNewComment] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const handleComment = async () => {
+    if (!newComment.trim()) return;
+    setSaving(true);
+    const commentaire = {
+      date: new Date().toLocaleDateString("fr-FR") + " " + new Date().toLocaleTimeString("fr-FR", { hour:"2-digit", minute:"2-digit" }),
+      texte: newComment.trim(),
+    };
+    await onAddCommentaire(litige.id, commentaire);
+    setNewComment("");
+    setSaving(false);
+  };
+
+  const col = LITIGE_STATUT_COLORS[litige.status] || "#666";
+
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.5)", zIndex:1200, display:"flex", alignItems:"center", justifyContent:"center" }}>
+      <div style={{ background:"#fff", borderRadius:14, padding:28, width:560, maxWidth:"95vw", maxHeight:"88vh", display:"flex", flexDirection:"column", boxShadow:"0 8px 40px rgba(0,0,0,.25)", border:"2px solid #D4A96A" }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:16 }}>
+          <div>
+            <div style={{ fontSize:11, color:"#9B7B5A", marginBottom:2 }}>{litige.id} · {litige.date}</div>
+            <h3 style={{ margin:0, fontFamily:"Georgia", color:"#2C1810", fontSize:15 }}>{litige.type}</h3>
+          </div>
+          <button onClick={onClose} style={{ background:"none", border:"none", fontSize:20, cursor:"pointer", color:"#9B7B5A" }}>✕</button>
+        </div>
+
+        <div style={{ display:"flex", gap:8, marginBottom:14, flexWrap:"wrap" }}>
+          <span style={{ padding:"3px 10px", borderRadius:10, background:col+"22", color:col, fontSize:11, fontWeight:700 }}>{litige.status}</span>
+          <span style={{ padding:"3px 10px", borderRadius:10, background:"#f5f5f5", color:"#555", fontSize:11 }}>🏭 {litige.fournisseur}</span>
+          <span style={{ padding:"3px 10px", borderRadius:10, background:"#f5f5f5", color:"#555", fontSize:11 }}>🏪 {litige.boulangerie}</span>
+        </div>
+
+        <div style={{ background:"#FFF8F0", border:"1px solid #EDD5B3", borderRadius:9, padding:"10px 14px", marginBottom:14, fontSize:12, color:"#2C1810", lineHeight:1.6 }}>
+          {litige.description}
+        </div>
+
+        {/* Changement de statut */}
+        <div style={{ display:"flex", gap:6, marginBottom:16, flexWrap:"wrap" }}>
+          <span style={{ fontSize:11, fontWeight:700, color:"#8B4513", alignSelf:"center" }}>Statut :</span>
+          {LITIGE_STATUTS.map(s => (
+            <button key={s} onClick={() => onUpdateStatus(litige.id, s)}
+              style={{
+                padding:"4px 12px", borderRadius:8, fontSize:11, fontWeight:700, cursor:"pointer",
+                border: `1.5px solid ${LITIGE_STATUT_COLORS[s]}`,
+                background: litige.status === s ? LITIGE_STATUT_COLORS[s] : "#fff",
+                color: litige.status === s ? "#fff" : LITIGE_STATUT_COLORS[s],
+              }}>
+              {s}
+            </button>
+          ))}
+        </div>
+
+        {/* Commentaires */}
+        <div style={{ flex:1, overflowY:"auto", marginBottom:12 }}>
+          <div style={{ fontSize:11, fontWeight:700, color:"#8B4513", marginBottom:8 }}>Suivi / Commentaires</div>
+          {(!litige.commentaires || litige.commentaires.length === 0) ? (
+            <div style={{ fontSize:11, color:"#b89878", fontStyle:"italic", padding:"8px 0" }}>Aucun commentaire pour l'instant.</div>
+          ) : (
+            <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+              {litige.commentaires.map((c, i) => (
+                <div key={i} style={{ background:"#FAF6F0", borderRadius:8, padding:"8px 12px", border:"1px solid #EDD5B3" }}>
+                  <div style={{ fontSize:10, color:"#9B7B5A", marginBottom:3 }}>{c.date}</div>
+                  <div style={{ fontSize:12, color:"#2C1810" }}>{c.texte}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Nouveau commentaire */}
+        <div style={{ display:"flex", gap:8, alignItems:"flex-end" }}>
+          <textarea value={newComment} onChange={e => setNewComment(e.target.value)}
+            rows={2} placeholder="Ajouter un commentaire de suivi…"
+            style={{ flex:1, padding:"8px 10px", borderRadius:8, border:"1.5px solid #D4A96A", background:"#fffaf5", fontSize:12, outline:"none", resize:"none", fontFamily:"inherit" }} />
+          <button onClick={handleComment} disabled={!newComment.trim() || saving}
+            style={{ padding:"8px 14px", borderRadius:8, border:"none", background: newComment.trim() ? "#8B4513" : "#ccc", color:"#fff", cursor: newComment.trim() ? "pointer" : "default", fontSize:12, fontWeight:700, flexShrink:0 }}>
+            {saving ? "⏳" : "Envoyer"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TabLitiges({ litiges, boulangerieId, isAdmin, onSave, onUpdateStatus, onAddCommentaire }) {
+  const [showModal, setShowModal] = useState(false);
+  const [detailLitige, setDetailLitige] = useState(null);
+  const [filterStatut, setFilterStatut] = useState("Tous");
+  const [filterType, setFilterType] = useState("Tous");
+  const [filterFour, setFilterFour] = useState("Tous");
+
+  const boulangerieName = isAdmin ? null : BOULANGERIES.find(b => b.id === boulangerieId)?.name;
+
+  const filtered = litiges.filter(l => {
+    if (!isAdmin && l.boulangerie !== boulangerieName) return false;
+    if (filterStatut !== "Tous" && l.status !== filterStatut) return false;
+    if (filterType !== "Tous" && l.type !== filterType) return false;
+    if (filterFour !== "Tous" && l.fournisseur !== filterFour) return false;
+    return true;
+  });
+
+  const fournisseursDispos = [...new Set(litiges.map(l => l.fournisseur))].sort();
+  const nbOuverts = litiges.filter(l => l.status === "Ouvert" && (!boulangerieName || l.boulangerie === boulangerieName)).length;
+
+  // Mettre à jour le litige dans la modale détail après un changement
+  const handleUpdateStatus = async (id, status) => {
+    await onUpdateStatus(id, status);
+    setDetailLitige(prev => prev ? { ...prev, status } : null);
+  };
+
+  const handleAddCommentaire = async (id, commentaire) => {
+    await onAddCommentaire(id, commentaire);
+    setDetailLitige(prev => prev ? { ...prev, commentaires: [...(prev.commentaires||[]), commentaire] } : null);
+  };
+
+  return (
+    <div>
+      {showModal && (
+        <ModalNouveauLitige
+          fournisseurs={FOURNISSEURS_LIST}
+          boulangerie={boulangerieName || BOULANGERIES.find(b => b.id === boulangerieId)?.name || ""}
+          onSave={onSave}
+          onClose={() => setShowModal(false)}
+        />
+      )}
+      {detailLitige && (
+        <ModalDetailLitige
+          litige={detailLitige}
+          onClose={() => setDetailLitige(null)}
+          onUpdateStatus={handleUpdateStatus}
+          onAddCommentaire={handleAddCommentaire}
+        />
+      )}
+
+      {/* Header */}
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16, flexWrap:"wrap", gap:10 }}>
+        <div>
+          <h2 style={{ margin:0, fontFamily:"Georgia", color:"#2C1810", fontSize:16 }}>⚠️ Litiges fournisseurs</h2>
+          {nbOuverts > 0 && (
+            <div style={{ fontSize:11, color:"#C0392B", fontWeight:700, marginTop:3 }}>
+              {nbOuverts} litige{nbOuverts > 1 ? "s" : ""} ouvert{nbOuverts > 1 ? "s" : ""}
+            </div>
+          )}
+        </div>
+        <button onClick={() => setShowModal(true)}
+          style={{ padding:"9px 18px", borderRadius:9, border:"none", background:"linear-gradient(135deg,#C0392B,#922B21)", color:"#fff", cursor:"pointer", fontSize:12, fontWeight:700, fontFamily:"Georgia, serif", boxShadow:"0 3px 12px rgba(192,57,43,.3)" }}>
+          ⚠️ Déclarer un litige
+        </button>
+      </div>
+
+      {/* Filtres */}
+      <div style={{ display:"flex", gap:8, marginBottom:16, flexWrap:"wrap" }}>
+        <select value={filterStatut} onChange={e => setFilterStatut(e.target.value)}
+          style={{ padding:"7px 10px", border:"1.5px solid #D4A96A", borderRadius:8, background:"#fffaf5", color:"#2C1810", fontSize:11, cursor:"pointer", outline:"none" }}>
+          <option value="Tous">Tous les statuts</option>
+          {LITIGE_STATUTS.map(s => <option key={s}>{s}</option>)}
+        </select>
+        <select value={filterType} onChange={e => setFilterType(e.target.value)}
+          style={{ padding:"7px 10px", border:"1.5px solid #D4A96A", borderRadius:8, background:"#fffaf5", color:"#2C1810", fontSize:11, cursor:"pointer", outline:"none" }}>
+          <option value="Tous">Tous les types</option>
+          {LITIGE_TYPES.map(t => <option key={t}>{t}</option>)}
+        </select>
+        {isAdmin && (
+          <select value={filterFour} onChange={e => setFilterFour(e.target.value)}
+            style={{ padding:"7px 10px", border:"1.5px solid #D4A96A", borderRadius:8, background:"#fffaf5", color:"#2C1810", fontSize:11, cursor:"pointer", outline:"none" }}>
+            <option value="Tous">Tous les fournisseurs</option>
+            {fournisseursDispos.map(f => <option key={f}>{f}</option>)}
+          </select>
+        )}
+        <span style={{ fontSize:11, color:"#9B7B5A", alignSelf:"center" }}>{filtered.length} litige(s)</span>
+      </div>
+
+      {/* Liste */}
+      {filtered.length === 0 ? (
+        <div style={{ textAlign:"center", padding:50, color:"#b89878" }}>
+          <div style={{ fontSize:36, marginBottom:10 }}>✅</div>
+          <div style={{ fontSize:13, fontWeight:600 }}>Aucun litige en cours</div>
+        </div>
+      ) : (
+        <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+          {[...filtered].sort((a,b) => {
+            const order = { "Ouvert":0, "En cours":1, "Résolu":2 };
+            return (order[a.status]??3) - (order[b.status]??3);
+          }).map(l => {
+            const col = LITIGE_STATUT_COLORS[l.status] || "#666";
+            return (
+              <div key={l.id} style={{
+                background:"#fff", borderRadius:12, border:`1.5px solid ${l.status === "Ouvert" ? "#e74c3c55" : "#EDD5B3"}`,
+                boxShadow: l.status === "Ouvert" ? "0 2px 12px rgba(192,57,43,.08)" : "0 2px 8px rgba(139,69,19,.05)",
+                overflow:"hidden", transition:"all .15s"
+              }}>
+                <div style={{ padding:"12px 16px" }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:8, marginBottom:6 }}>
+                    <div style={{ flex:1 }}>
+                      <div style={{ fontSize:10, color:"#9B7B5A", marginBottom:2 }}>{l.id} · {l.date}</div>
+                      <div style={{ fontSize:13, fontWeight:700, color:"#2C1810", fontFamily:"Georgia" }}>{l.type}</div>
+                    </div>
+                    <span style={{ padding:"3px 10px", borderRadius:10, background:col+"22", color:col, fontSize:11, fontWeight:700, whiteSpace:"nowrap", flexShrink:0 }}>
+                      {l.status}
+                    </span>
+                  </div>
+                  <div style={{ display:"flex", gap:8, marginBottom:8, flexWrap:"wrap" }}>
+                    <span style={{ fontSize:11, color:"#7A8A6A" }}>🏭 {l.fournisseur}</span>
+                    {isAdmin && <span style={{ fontSize:11, color:"#9B7B5A" }}>🏪 {l.boulangerie}</span>}
+                    {l.commentaires?.length > 0 && <span style={{ fontSize:11, color:"#5B7FA6" }}>💬 {l.commentaires.length} commentaire(s)</span>}
+                  </div>
+                  <div style={{ fontSize:11, color:"#555", lineHeight:1.5, marginBottom:10,
+                    display:"-webkit-box", WebkitLineClamp:2, WebkitBoxOrient:"vertical", overflow:"hidden" }}>
+                    {l.description}
+                  </div>
+                  <div style={{ display:"flex", gap:6 }}>
+                    <button onClick={() => setDetailLitige(l)}
+                      style={{ flex:1, padding:"6px 10px", borderRadius:7, border:"1.5px solid #D4A96A", background:"#fffaf5", color:"#8B4513", cursor:"pointer", fontSize:11, fontWeight:700, transition:"all .15s" }}
+                      onMouseEnter={e => { e.currentTarget.style.background="#8B4513"; e.currentTarget.style.color="#fff"; }}
+                      onMouseLeave={e => { e.currentTarget.style.background="#fffaf5"; e.currentTarget.style.color="#8B4513"; }}
+                    >👁 Voir / Commenter</button>
+                    {l.status !== "Résolu" && (
+                      <button onClick={() => onUpdateStatus(l.id, "Résolu")}
+                        style={{ padding:"6px 12px", borderRadius:7, border:"1.5px solid #217346", background:"#f0fff4", color:"#217346", cursor:"pointer", fontSize:11, fontWeight:700, transition:"all .15s" }}
+                        onMouseEnter={e => { e.currentTarget.style.background="#217346"; e.currentTarget.style.color="#fff"; }}
+                        onMouseLeave={e => { e.currentTarget.style.background="#f0fff4"; e.currentTarget.style.color="#217346"; }}
+                      >✓ Résolu</button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── TAB DASHBOARD ───────────────────────────────────────────────────────────
 function TabDashboard({ history }) {
   const totalCA = history.reduce((s, c) => s + c.total, 0);
@@ -4080,6 +4392,7 @@ export default function App() {
     chargerMercuriale();
     chargerFavoris(compteChoisi.boulangerieId);
     chargerBrouillon(compteChoisi.boulangerieId);
+    chargerLitiges();
   };
 
   if (!compte) return <LoginScreen onLogin={handleLogin} />;
@@ -4156,6 +4469,38 @@ export default function App() {
     }
   };
 
+  // ── Litiges ──
+  const [litiges, setLitiges] = useState([]);
+
+  const chargerLitiges = async () => {
+    try {
+      const res = await fetch(SHEETS_URL + `?action=getLitiges`);
+      const data = JSON.parse(await res.text());
+      if (data.success) setLitiges(data.litiges || []);
+    } catch(e) { console.error("Erreur chargement litiges", e); }
+  };
+
+  const saveLitige = async (litige) => {
+    setLitiges(prev => [litige, ...prev]);
+    try {
+      await postToSheets(SHEETS_URL, { action: "saveLitige", litige });
+    } catch(e) { console.error("Erreur sauvegarde litige", e); }
+  };
+
+  const updateLitigeStatus = async (id, status) => {
+    setLitiges(prev => prev.map(l => l.id === id ? { ...l, status } : l));
+    try {
+      await postToSheets(SHEETS_URL, { action: "updateLitigeStatus", id, status });
+    } catch(e) { console.error("Erreur statut litige", e); }
+  };
+
+  const addLitigeCommentaire = async (id, commentaire) => {
+    setLitiges(prev => prev.map(l => l.id === id ? { ...l, commentaires: [...(l.commentaires||[]), commentaire] } : l));
+    try {
+      await postToSheets(SHEETS_URL, { action: "addLitigeCommentaire", id, commentaire });
+    } catch(e) { console.error("Erreur commentaire litige", e); }
+  };
+
   const tabs = [
     { id: "dashboard",   label: "Tableau de bord",            icon: "📊" },
     { id: "commande",    label: "Commande matières premières", icon: "🌾" },
@@ -4163,6 +4508,7 @@ export default function App() {
     { id: "patisserie",  label: "Commande pâtisserie",         icon: "🍰" },
     { id: "coutmatiere", label: "Coût matière",                icon: "🧮" },
     { id: "historique",  label: "Historique",                  icon: "📋" },
+    { id: "litiges",     label: "Litiges",                     icon: "⚠️" },
   ];
 
   return (
@@ -4266,6 +4612,11 @@ export default function App() {
             {t.id==="historique" && historyVisible.length > 0 && (
               <span style={{ background:"#EDD5B3", color:"#8B4513", borderRadius:10, fontSize:10, padding:"1px 6px" }}>{historyVisible.length}</span>
             )}
+            {t.id==="litiges" && litiges.filter(l => l.status === "Ouvert").length > 0 && (
+              <span style={{ background:"#C0392B", color:"#fff", borderRadius:10, fontSize:10, padding:"1px 6px", fontWeight:800 }}>
+                {litiges.filter(l => l.status === "Ouvert").length}
+              </span>
+            )}
           </button>
         ))}
       </div>
@@ -4279,6 +4630,7 @@ export default function App() {
           {tab==="patisserie"  && <TabPatisserie boulangerieId={boulangerieId} compte={compte} isAdmin={isAdmin} />}
           {tab==="coutmatiere" && <TabCoutMatiere boulangerieId={boulangerieId} isAdmin={isAdmin} produits={produits} />}
           {tab==="historique"  && <TabHistorique history={historyVisible} onUpdateStatus={updateStatus} onUpdateCommande={updateCommande} onAddCommande={addToHistory} isAdmin={isAdmin} />}
+          {tab==="litiges"     && <TabLitiges litiges={litiges} boulangerieId={boulangerieId} isAdmin={isAdmin} onSave={saveLitige} onUpdateStatus={updateLitigeStatus} onAddCommentaire={addLitigeCommentaire} />}
         </div>
       </div>
     </div>
