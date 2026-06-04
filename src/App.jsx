@@ -645,6 +645,9 @@ function CartPanel({ cart, setCart, boulangerieId, addToHistory }) {
                 <div style={{ flex:1 }}>
                   <div style={{ fontSize:11, fontWeight:600, color:"#2C1810", lineHeight:1.3 }}>{item.name}</div>
                   <div style={{ fontSize:10, color:"#9B7B5A" }}>{fmt(item.prix_ht)} HT × {item.qty} = {fmt(item.prix_ht * item.qty)}</div>
+                  {item.cond_label && (
+                    <div style={{ fontSize:9, color:"#8B4513", fontWeight:700, marginTop:1 }}>📦 {item.cond_label}</div>
+                  )}
                 </div>
                 <button onClick={()=>setCart(c=>c.filter(x=>(x.ref||x.name)!==(item.ref||item.name)))}
                   style={{ border:"none", background:"#fde8e8", color:"#c0392b", borderRadius:4, width:18, height:18, cursor:"pointer", fontSize:10, flexShrink:0 }}>✕</button>
@@ -832,6 +835,9 @@ function MobileCartBar({ cart, boulangerieId, setCart, addToHistory }) {
               <div style={{ flex:1, minWidth:0 }}>
                 <div style={{ fontSize:12, fontWeight:600, color:"#2C1810" }}>{item.name}</div>
                 <div style={{ fontSize:10, color:"#9B7B5A" }}>{fmt(item.prix_ht)} HT × {item.qty} = {fmt(item.prix_ht * item.qty)}</div>
+                {item.cond_label && (
+                  <div style={{ fontSize:9, color:"#8B4513", fontWeight:700 }}>📦 {item.cond_label}</div>
+                )}
               </div>
               <div style={{ display:"flex", alignItems:"center", gap:4 }}>
                 <button onClick={() => setCart(c => c.map(x => (x.ref||x.name)===(item.ref||item.name) ? {...x, qty:Math.max(1,x.qty-1)} : x))}
@@ -969,6 +975,7 @@ function TabCommande({ cart, setCart, boulangerieId, addToHistory, produits, set
   const [qtys, setQtys] = useState({});
   const [showPrixFour, setShowPrixFour] = useState(null);
   const [showTriFavoris, setShowTriFavoris] = useState(false);
+  const [condModes, setCondModes] = useState({}); // key → "unite" | "carton"
 
   // Moyenne des quantités commandées sur les 4 dernières semaines
   const moyennes = useMemo(() => {
@@ -1054,6 +1061,7 @@ function TabCommande({ cart, setCart, boulangerieId, addToHistory, produits, set
         const unit = row[2] != null ? String(row[2]) : "1";
         const four = row[8] ? String(row[8]).trim() : "";
         const prix = parseFloat(row[9]);
+        const cond_carton = row[10] ? parseInt(row[10]) : null; // colonne K : nb unités par carton
         if (!name || isNaN(prix) || prix <= 0) continue;
         const ancien = ALL_PRODUCTS.find(p => p.ref === ref || p.name === name);
         const cat = ancien?.cat || "Divers";
@@ -1063,7 +1071,7 @@ function TabCommande({ cart, setCart, boulangerieId, addToHistory, produits, set
           const p = parseFloat(row[col]);
           if (!isNaN(p) && p > 0) prix_fournisseurs[fourHeaders[idx]] = p;
         });
-        nouveaux.push({ ref, name, unit, prix_ht: prix, tva: 0.055, cat, four, prix_fournisseurs });
+        nouveaux.push({ ref, name, unit, prix_ht: prix, tva: 0.055, cat, four, prix_fournisseurs, ...(cond_carton && cond_carton > 1 ? { cond_carton } : {}) });
       }
       if (nouveaux.length === 0) {
         setImportMsg({ type: "error", text: "❌ Aucun produit trouvé dans le fichier." });
@@ -1255,6 +1263,12 @@ function TabCommande({ cart, setCart, boulangerieId, addToHistory, produits, set
                 {product.unit && product.unit !== "1" && (
                   <div style={{ fontSize:10, color:"#9B7B5A" }}>Cond. : {product.unit}</div>
                 )}
+                {product.cond_carton && product.cond_carton > 1 && (
+                  <div style={{ fontSize:10, color:"#8B4513", display:"flex", alignItems:"center", gap:3 }}>
+                    <span style={{ fontSize:9 }}>📦</span>
+                    Carton de <strong>{product.cond_carton}</strong> unités
+                  </div>
+                )}
                 {product.four && (
                   <div style={{ fontSize:10, color:"#7A8A6A", display:"flex", alignItems:"center", gap:3 }}>
                     <span style={{ fontSize:9 }}>🏭</span>
@@ -1307,10 +1321,24 @@ function TabCommande({ cart, setCart, boulangerieId, addToHistory, produits, set
                     {inCart ? (
                       <button onClick={() => setCart(prev => prev.filter(x => ((x.ref&&x.name)?`${x.ref}__${x.name}`:(x.ref||x.name)) !== key))}
                         style={{ padding:"5px 10px", borderRadius:7, background:"linear-gradient(135deg,#8B4513,#6B3210)", color:"#fff", border:"none", cursor:"pointer", fontSize:11, fontWeight:700 }}>
-                        ✓ ×{inCart.qty} — Retirer
+                        ✓ ×{inCart.qty}{inCart.cond_label ? ` ${inCart.cond_label}` : ""} — Retirer
                       </button>
                     ) : (
                       <>
+                        {/* Sélecteur conditionnement si cond_carton défini */}
+                        {product.cond_carton && product.cond_carton > 1 && (
+                          <select
+                            value={condModes[key] || "unite"}
+                            onChange={e => setCondModes(m => ({...m, [key]: e.target.value}))}
+                            style={{
+                              padding:"3px 6px", borderRadius:6, border:"1px solid #D4A96A",
+                              background:"#fffaf5", color:"#8B4513", fontSize:10, fontWeight:700,
+                              cursor:"pointer"
+                            }}>
+                            <option value="unite">À l'unité</option>
+                            <option value="carton">Carton ×{product.cond_carton}</option>
+                          </select>
+                        )}
                         <button onClick={() => setQtys(q => ({...q, [key]: Math.max(1,(q[key]||1)-1)}))}
                           style={{ padding:"3px 8px", borderRadius:6, border:"1px solid #D4A96A", background:"#fff", cursor:"pointer", fontSize:14, lineHeight:1 }}>−</button>
                         <input type="number" value={qtys[key]||1} min="1"
@@ -1318,7 +1346,14 @@ function TabCommande({ cart, setCart, boulangerieId, addToHistory, produits, set
                           style={{ width:44, textAlign:"center", padding:"3px 4px", border:"1px solid #D4A96A", borderRadius:6, fontSize:12, fontWeight:700, color:"#2C1810", background:"#fffaf5" }}/>
                         <button onClick={() => setQtys(q => ({...q, [key]: (q[key]||1)+1}))}
                           style={{ padding:"3px 8px", borderRadius:6, border:"1px solid #D4A96A", background:"#fff", cursor:"pointer", fontSize:14, lineHeight:1 }}>+</button>
-                        <button onClick={() => { addToCart(product, qtys[key]||1); }}
+                        <button onClick={() => {
+                          const rawQty = qtys[key] || 1;
+                          const mode = condModes[key] || "unite";
+                          const isCarton = product.cond_carton && product.cond_carton > 1 && mode === "carton";
+                          const finalQty = isCarton ? rawQty * product.cond_carton : rawQty;
+                          const condLabel = isCarton ? `carton×${product.cond_carton}` : null;
+                          addToCart({ ...product, ...(condLabel ? { cond_label: condLabel } : {}) }, finalQty);
+                        }}
                           style={{ padding:"5px 10px", borderRadius:7, background:"linear-gradient(135deg,#C4874A,#8B4513)", color:"#fff", border:"none", cursor:"pointer", fontSize:11, fontWeight:700 }}>
                           + Ajouter
                         </button>
@@ -2311,10 +2346,11 @@ function TabEmballages({ emballages, boulangerieId, isAdmin, onAjouter, onModifi
   );
 }
 
-function TabHistorique({ history, onUpdateStatus, onUpdateCommande, isAdmin }) {
+function TabHistorique({ history, onUpdateStatus, onUpdateCommande, onAddCommande, isAdmin }) {
   const [filterB, setFilterB] = useState("Tous");
   const [filterStatus, setFilterStatus] = useState("Tous");
   const [filterType, setFilterType] = useState("Tous");
+  const [showArchives, setShowArchives] = useState(false);
   const [cmdDetail, setCmdDetail] = useState(null);
   const [cmdModif, setCmdModif] = useState(null);
   const [fusionMode, setFusionMode] = useState(false);
@@ -2322,11 +2358,16 @@ function TabHistorique({ history, onUpdateStatus, onUpdateCommande, isAdmin }) {
   const [showFusionConfirm, setShowFusionConfirm] = useState(false);
 
   const filtered = history.filter(c => {
-    return c.status !== "Fusionné" &&
-           (filterB === "Tous" || c.boulangerie === filterB) &&
+    const estArchivee = c.status === "Archivé";
+    const estFusionnee = c.status === "Fusionné";
+    if (estFusionnee) return false;
+    if (!showArchives && estArchivee) return false;
+    return (filterB === "Tous" || c.boulangerie === filterB) &&
            (filterStatus === "Tous" || c.status === filterStatus) &&
            (filterType === "Tous" || c.type === filterType);
   });
+
+  const nbArchives = history.filter(c => c.status === "Archivé").length;
 
   const statusColor = { "Livré": "#217346", "En cours": "#E67E22", "Annulé": "#C0392B" };
   const bNames = ["Tous", ...BOULANGERIES.map(b => b.name)];
@@ -2372,6 +2413,17 @@ function TabHistorique({ history, onUpdateStatus, onUpdateCommande, isAdmin }) {
           {["Tous","Matières premières","Emballages"].map(t => <option key={t}>{t}</option>)}
         </select>
         <span style={{ fontSize:11, color:"#9B7B5A", whiteSpace:"nowrap" }}>{filtered.length} commande(s)</span>
+        {nbArchives > 0 && (
+          <button onClick={() => setShowArchives(v => !v)}
+            style={{
+              padding:"7px 14px", borderRadius:8, fontSize:11, fontWeight:700, cursor:"pointer",
+              border: showArchives ? "none" : "1.5px solid #7A8A6A",
+              background: showArchives ? "#4A6741" : "#fff",
+              color: showArchives ? "#fff" : "#4A6741",
+            }}>
+            {showArchives ? "🗂 Masquer archives" : `🗂 Archives (${nbArchives})`}
+          </button>
+        )}
         {isAdmin && (
           <button onClick={() => { setFusionMode(!fusionMode); setFusionSelection([]); }}
             style={{
@@ -2464,10 +2516,9 @@ function TabHistorique({ history, onUpdateStatus, onUpdateCommande, isAdmin }) {
                     detail: mergedDetail,
                     status: "En cours"
                   };
-                  // Sauvegarder la fusionnée
-                  await onUpdateCommande(fusionnee);
-                  // Supprimer les deux originales via updateStatus Annulé puis filtrage
-                  // On utilise un statut spécial "Fusionné" pour les masquer
+                  // Ajouter la nouvelle commande fusionnée (nouvel ID)
+                  await onAddCommande(fusionnee);
+                  // Masquer les deux originales avec statut "Fusionné"
                   await onUpdateStatus(c1.id, "Fusionné");
                   await onUpdateStatus(c2.id, "Fusionné");
                   setShowFusionConfirm(false);
@@ -2524,8 +2575,12 @@ function TabHistorique({ history, onUpdateStatus, onUpdateCommande, isAdmin }) {
                       {cmd.type === "Emballages" ? "📦 Emballages" : "🌾 Mat. premières"}
                     </span>
                   </div>
-                  <span style={{ padding:"3px 10px", borderRadius:10, background:statusColor[cmd.status]+"22", color:statusColor[cmd.status], fontSize:11, fontWeight:700 }}>
-                    {cmd.status}
+                  <span style={{
+                    padding:"3px 10px", borderRadius:10, fontSize:11, fontWeight:700,
+                    background: cmd.status === "Archivé" ? "#4A674122" : (statusColor[cmd.status]||"#ccc")+"22",
+                    color: cmd.status === "Archivé" ? "#4A6741" : (statusColor[cmd.status]||"#666"),
+                  }}>
+                    {cmd.status === "Archivé" ? "🗂 Archivé" : cmd.status}
                   </span>
                 </div>
 
@@ -2555,7 +2610,23 @@ function TabHistorique({ history, onUpdateStatus, onUpdateCommande, isAdmin }) {
                     onMouseLeave={e => { e.currentTarget.style.background="#f0f4ff"; e.currentTarget.style.color="#3A5A9B"; }}
                   >✏️ Modifier</button>
 
-                  {cmd.status !== "Annulé" && (
+                  {cmd.status === "Archivé" ? (
+                    <button
+                      onClick={() => onUpdateStatus(cmd.id, "En cours")}
+                      style={{ flex:1, minWidth:90, padding:"7px 6px", borderRadius:7, border:"1.5px solid #7A8A6A", background:"#f5f8f4", color:"#4A6741", cursor:"pointer", fontSize:11, fontWeight:700, transition:"all .15s" }}
+                      onMouseEnter={e => { e.currentTarget.style.background="#4A6741"; e.currentTarget.style.color="#fff"; }}
+                      onMouseLeave={e => { e.currentTarget.style.background="#f5f8f4"; e.currentTarget.style.color="#4A6741"; }}
+                    >♻️ Désarchiver</button>
+                  ) : (
+                    <button
+                      onClick={() => onUpdateStatus(cmd.id, "Archivé")}
+                      style={{ flex:1, minWidth:80, padding:"7px 6px", borderRadius:7, border:"1.5px solid #7A8A6A", background:"#f5f8f4", color:"#4A6741", cursor:"pointer", fontSize:11, fontWeight:700, transition:"all .15s" }}
+                      onMouseEnter={e => { e.currentTarget.style.background="#4A6741"; e.currentTarget.style.color="#fff"; }}
+                      onMouseLeave={e => { e.currentTarget.style.background="#f5f8f4"; e.currentTarget.style.color="#4A6741"; }}
+                    >🗂 Archiver</button>
+                  )}
+
+                  {cmd.status !== "Annulé" && cmd.status !== "Archivé" && (
                     <button
                       onClick={() => { if (window.confirm(`Annuler la commande ${cmd.id} ?`)) { onUpdateStatus(cmd.id, "Annulé"); } }}
                       style={{ flex:1, minWidth:80, padding:"7px 6px", borderRadius:7, border:"1.5px solid #e74c3c", background:"#fff5f5", color:"#c0392b", cursor:"pointer", fontSize:11, fontWeight:700, transition:"all .15s" }}
@@ -4204,7 +4275,7 @@ export default function App() {
           {tab==="emballages"  && <TabEmballages emballages={emballages} boulangerieId={boulangerieId} isAdmin={isAdmin} onAjouter={ajouterEmballage} onModifierStock={modifierStockEmb} onCommander={passerCommandeEmb} />}
           {tab==="patisserie"  && <TabPatisserie boulangerieId={boulangerieId} compte={compte} isAdmin={isAdmin} />}
           {tab==="coutmatiere" && <TabCoutMatiere boulangerieId={boulangerieId} isAdmin={isAdmin} produits={produits} />}
-          {tab==="historique"  && <TabHistorique history={historyVisible} onUpdateStatus={updateStatus} onUpdateCommande={updateCommande} isAdmin={isAdmin} />}
+          {tab==="historique"  && <TabHistorique history={historyVisible} onUpdateStatus={updateStatus} onUpdateCommande={updateCommande} onAddCommande={addToHistory} isAdmin={isAdmin} />}
         </div>
       </div>
     </div>
