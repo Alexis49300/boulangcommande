@@ -4199,6 +4199,7 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState(false);
+  const [litiges, setLitiges] = useState([]);
 
   // ── Mercuriale ──
   const [produits, setProduits] = useState(ALL_PRODUCTS);
@@ -4470,8 +4471,6 @@ export default function App() {
   };
 
   // ── Litiges ──
-  const [litiges, setLitiges] = useState([]);
-
   const chargerLitiges = async () => {
     try {
       const res = await fetch(SHEETS_URL + `?action=getLitiges`);
