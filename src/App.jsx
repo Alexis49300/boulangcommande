@@ -56,6 +56,43 @@ const BOULANGERIES = [
   { id: 5, name: "La Pause Cholet",                  color: "#9B6B47" },
 ];
 
+
+// Fenêtre par défaut pour une boulangerie
+const FENETRE_DEFAULT = {
+  ouverture: { jour: 3, heure: 0, minute: 0 },   // mercredi 0h00
+  fermeture: { jour: 1, heure: 7, minute: 30 },   // lundi 7h30
+};
+
+// Fenêtres par boulangerie : { [boulangerieId]: { ouverture, fermeture } | null }
+// null = pas de restriction pour cette boulangerie
+const FENETRES_DEFAULT = {
+  1: { ouverture: { jour: 3, heure: 0, minute: 0 }, fermeture: { jour: 1, heure: 7, minute: 30 } },
+  2: { ouverture: { jour: 3, heure: 0, minute: 0 }, fermeture: { jour: 1, heure: 7, minute: 30 } },
+  3: null,
+  4: null,
+  5: { ouverture: { jour: 3, heure: 0, minute: 0 }, fermeture: { jour: 1, heure: 7, minute: 30 } },
+};
+
+const JOURS = ["Dimanche","Lundi","Mardi","Mercredi","Jeudi","Vendredi","Samedi"];
+
+// Retourne true si la boulangerie peut commander maintenant
+function commandeOuverte(fenetre) {
+  if (!fenetre) return true; // pas de restriction
+  const now = new Date();
+  const toAbs = (j, h, m) => j * 24 * 60 + h * 60 + m;
+  const absNow = toAbs(now.getDay(), now.getHours(), now.getMinutes());
+  const absOuv = toAbs(fenetre.ouverture.jour, fenetre.ouverture.heure, fenetre.ouverture.minute);
+  const absFer = toAbs(fenetre.fermeture.jour, fenetre.fermeture.heure, fenetre.fermeture.minute);
+  if (absOuv <= absFer) return absNow >= absOuv && absNow <= absFer;
+  return absNow >= absOuv || absNow <= absFer;
+}
+
+// Récupère la fenêtre d'une boulangerie depuis le state fenetres
+function getFenetrePour(fenetres, boulangerieId) {
+  if (fenetres && fenetres[boulangerieId] !== undefined) return fenetres[boulangerieId];
+  return FENETRES_DEFAULT[boulangerieId] ?? null;
+}
+
 const ALL_PRODUCTS = [
   { ref: 'FRU15', name: 'Abricot 1/2 pelé sirop 5/1', unit: '1', prix_ht: 9.88, tva: 0.055, cat: 'Fruits & Garnitures', four: 'Fuseau' },
   { ref: 'FRU16', name: 'Abricot Cube 5/5mms 4kg', unit: '1', prix_ht: 8.34, tva: 0.055, cat: 'Fruits & Garnitures', four: 'Fuseau' },
@@ -600,13 +637,15 @@ function PriceTag({ prix_ht, tva }) {
   );
 }
 
-function CartPanel({ cart, setCart, boulangerieId, addToHistory }) {
+function CartPanel({ cart, setCart, boulangerieId, addToHistory, isAdmin, fenetre }) {
   const total_ht = cart.reduce((s, i) => s + i.prix_ht * i.qty, 0);
   const total_ttc = cart.reduce((s, i) => s + i.prix_ht * (1 + i.tva) * i.qty, 0);
   const boulangerieNom = BOULANGERIES.find(b => b.id === boulangerieId)?.name || "";
+  const ouvert = commandeOuverte(fenetre);
+  const peutValider = boulangerieId && cart.length > 0 && (isAdmin || fenetre === null || ouvert);
 
   const handleValidate = () => {
-    if (!boulangerieId || cart.length === 0) return;
+    if (!peutValider) return;
     const cmd = {
       id: `CMD-${new Date().getFullYear()}-${String(Math.floor(Math.random()*9000)+1000)}`,
       date: today(), boulangerie: boulangerieNom,
@@ -673,17 +712,25 @@ function CartPanel({ cart, setCart, boulangerieId, addToHistory }) {
               <span>Total TTC</span><span>{fmt(total_ttc)}</span>
             </div>
           </div>
-          <button onClick={handleValidate} disabled={!boulangerieId}
+          <button onClick={handleValidate} disabled={!peutValider}
             style={{
               width:"100%", marginTop:10, padding:"10px 0",
-              background: boulangerieId ? "linear-gradient(135deg, #8B4513, #6B3210)" : "#ccc",
+              background: peutValider ? "linear-gradient(135deg, #8B4513, #6B3210)" : "#ccc",
               color:"#fff", border:"none", borderRadius:9,
-              cursor: boulangerieId ? "pointer" : "not-allowed",
+              cursor: peutValider ? "pointer" : "not-allowed",
               fontWeight:700, fontSize:12, fontFamily:"Georgia, serif",
-              boxShadow: boulangerieId ? "0 3px 12px rgba(139,69,19,.35)" : "none"
+              boxShadow: peutValider ? "0 3px 12px rgba(139,69,19,.35)" : "none"
             }}>
-            {boulangerieId ? "✓ Valider la commande" : "Choisir une boulangerie"}
+            {!boulangerieId ? "Choisir une boulangerie"
+              : (!isAdmin && fenetre !== null && !ouvert) ? "🔒 Commandes fermées"
+              : "✓ Valider la commande"}
           </button>
+          {!isAdmin && fenetre !== null && !ouvert && (
+            <div style={{ marginTop:8, fontSize:10, color:"#C0392B", textAlign:"center", lineHeight:1.4 }}>
+              Les commandes sont fermées.<br/>
+              Fenêtre : {JOURS[fenetre.ouverture.jour]} {String(fenetre.ouverture.heure).padStart(2,"0")}h{String(fenetre.ouverture.minute).padStart(2,"0")} → {JOURS[fenetre.fermeture.jour]} {String(fenetre.fermeture.heure).padStart(2,"0")}h{String(fenetre.fermeture.minute).padStart(2,"0")}
+            </div>
+          )}
         </>
       )}
     </div>
@@ -770,14 +817,16 @@ function ModalProduitLibre({ onClose, onAdd }) {
 }
 
 // ─── TAB COMMANDE ─────────────────────────────────────────────────────────────
-function MobileCartBar({ cart, boulangerieId, setCart, addToHistory }) {
+function MobileCartBar({ cart, boulangerieId, setCart, addToHistory, isAdmin, fenetre }) {
   const [open, setOpen] = useState(false);
   const total_ttc = cart.reduce((s, i) => s + i.prix_ht * (1 + i.tva) * i.qty, 0);
   const nbArticles = cart.reduce((s, i) => s + i.qty, 0);
   const boulangerieNom = BOULANGERIES.find(b => b.id === boulangerieId)?.name || "";
+  const ouvert = commandeOuverte(fenetre);
+  const peutValider = boulangerieId && cart.length > 0 && (isAdmin || fenetre === null || ouvert);
 
   const handleValidate = () => {
-    if (!boulangerieId || cart.length === 0) return;
+    if (!peutValider) return;
     const cmd = {
       id: `CMD-${new Date().getFullYear()}-${String(Math.floor(Math.random()*9000)+1000)}`,
       date: today(), boulangerie: boulangerieNom,
@@ -825,14 +874,21 @@ function MobileCartBar({ cart, boulangerieId, setCart, addToHistory }) {
               </div>
             </div>
           ))}
-          <button onClick={handleValidate} disabled={!boulangerieId || cart.length === 0}
+          <button onClick={handleValidate} disabled={!peutValider}
             style={{
               width:"100%", padding:"12px", marginTop:8, borderRadius:9, border:"none",
-              background: boulangerieId && cart.length > 0 ? "linear-gradient(135deg,#8B4513,#6B3210)" : "#ccc",
-              color:"#fff", fontWeight:700, fontSize:14, fontFamily:"Georgia", cursor: boulangerieId && cart.length > 0 ? "pointer" : "default"
+              background: peutValider ? "linear-gradient(135deg,#8B4513,#6B3210)" : "#ccc",
+              color:"#fff", fontWeight:700, fontSize:14, fontFamily:"Georgia", cursor: peutValider ? "pointer" : "default"
             }}>
-            {boulangerieId ? `✅ Valider — ${fmt(total_ttc)}` : "Choisir une boulangerie"}
+            {!boulangerieId ? "Choisir une boulangerie"
+              : (!isAdmin && fenetre !== null && !ouvert) ? "🔒 Commandes fermées"
+              : `✅ Valider — ${fmt(total_ttc)}`}
           </button>
+          {!isAdmin && fenetre !== null && !ouvert && (
+            <div style={{ marginTop:6, fontSize:10, color:"#C0392B", textAlign:"center", lineHeight:1.4 }}>
+              Fenêtre : {JOURS[fenetre.ouverture.jour]} {String(fenetre.ouverture.heure).padStart(2,"0")}h{String(fenetre.ouverture.minute).padStart(2,"0")} → {JOURS[fenetre.fermeture.jour]} {String(fenetre.fermeture.heure).padStart(2,"0")}h{String(fenetre.fermeture.minute).padStart(2,"0")}
+            </div>
+          )}
         </div>
       )}
 
@@ -942,7 +998,7 @@ function ModalTriFavoris({ favoris, produits, onSave, onClose }) {
   );
 }
 
-function TabCommande({ cart, setCart, boulangerieId, addToHistory, produits, setProduits, favoris, toggleFavori, reordonnerFavoris, history }) {
+function TabCommande({ cart, setCart, boulangerieId, addToHistory, produits, setProduits, favoris, toggleFavori, reordonnerFavoris, history, isAdmin, fenetres, onSaveFenetre }) {
   const [search, setSearch] = useState("");
   const [filterCat, setFilterCat] = useState("Tous");
   const [showModal, setShowModal] = useState(false);
@@ -950,7 +1006,12 @@ function TabCommande({ cart, setCart, boulangerieId, addToHistory, produits, set
   const [qtys, setQtys] = useState({});
   const [showPrixFour, setShowPrixFour] = useState(null);
   const [showTriFavoris, setShowTriFavoris] = useState(false);
-  const [condModes, setCondModes] = useState({}); // key → "unite" | "carton"
+  const [condModes, setCondModes] = useState({});
+  const [showFenetreConfig, setShowFenetreConfig] = useState(false);
+  const [fenetresEdit, setFenetresEdit] = useState(null); // édition en cours
+
+  const fenetre = getFenetrePour(fenetres, boulangerieId);
+  const ouvert = commandeOuverte(fenetre);
 
   // Moyenne des quantités commandées sur les 4 dernières semaines
   const moyennes = useMemo(() => {
@@ -1084,6 +1145,113 @@ function TabCommande({ cart, setCart, boulangerieId, addToHistory, produits, set
   return (
     <>
     {showModal && <ModalProduitLibre onClose={() => setShowModal(false)} onAdd={addCustomToCart} />}
+    {showTriFavoris && (
+      <ModalTriFavoris
+        favoris={favoris}
+        produits={produits}
+        onSave={reordonnerFavoris}
+        onClose={() => setShowTriFavoris(false)}
+      />
+    )}
+
+    {/* Modale config fenêtres de commande (admin) */}
+    {showFenetreConfig && (
+      <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.5)", zIndex:1200, display:"flex", alignItems:"center", justifyContent:"center" }}>
+        <div style={{ background:"#fff", borderRadius:14, padding:28, width:560, maxWidth:"95vw", maxHeight:"90vh", display:"flex", flexDirection:"column", boxShadow:"0 8px 40px rgba(0,0,0,.25)", border:"2px solid #D4A96A" }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:18 }}>
+            <h3 style={{ margin:0, fontFamily:"Georgia", color:"#2C1810", fontSize:15 }}>🕐 Fenêtres de commande</h3>
+            <button onClick={() => setShowFenetreConfig(false)} style={{ background:"none", border:"none", fontSize:20, cursor:"pointer", color:"#9B7B5A" }}>✕</button>
+          </div>
+          <div style={{ flex:1, overflowY:"auto", display:"flex", flexDirection:"column", gap:14 }}>
+            {BOULANGERIES.map(b => {
+              const f = fenetresEdit ? (fenetresEdit[b.id] ?? null) : (fenetres[b.id] ?? null);
+              const actif = f !== null;
+              return (
+                <div key={b.id} style={{ border:`1.5px solid ${actif ? "#D4A96A" : "#e0e0e0"}`, borderRadius:10, padding:"12px 14px", background: actif ? "#fffaf5" : "#fafafa" }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom: actif ? 10 : 0 }}>
+                    <span style={{ fontSize:12, fontWeight:700, color:"#2C1810", fontFamily:"Georgia" }}>{b.name.replace("Pense Au Pain ","")}</span>
+                    <label style={{ display:"flex", alignItems:"center", gap:6, cursor:"pointer", fontSize:11, color:"#8B4513", fontWeight:700 }}>
+                      <input type="checkbox" checked={actif} onChange={e => {
+                        const next = { ...(fenetresEdit || fenetres) };
+                        next[b.id] = e.target.checked ? (FENETRES_DEFAULT[b.id] || FENETRE_DEFAULT) : null;
+                        setFenetresEdit(next);
+                      }} style={{ width:15, height:15, accentColor:"#8B4513", cursor:"pointer" }} />
+                      {actif ? "Fenêtre active" : "Pas de restriction"}
+                    </label>
+                  </div>
+                  {actif && (
+                    <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                      {[["ouverture","📅 Ouverture"],["fermeture","🔒 Fermeture"]].map(([cle,label]) => (
+                        <div key={cle} style={{ display:"flex", alignItems:"center", gap:8 }}>
+                          <span style={{ fontSize:10, fontWeight:700, color:"#8B4513", minWidth:70 }}>{label}</span>
+                          <select value={f[cle].jour} onChange={e => {
+                            const next = { ...(fenetresEdit || fenetres) };
+                            next[b.id] = { ...next[b.id], [cle]: { ...next[b.id][cle], jour: Number(e.target.value) } };
+                            setFenetresEdit(next);
+                          }} style={{ flex:2, padding:"5px 8px", border:"1.5px solid #D4A96A", borderRadius:7, background:"#fff", color:"#2C1810", fontSize:11, outline:"none", cursor:"pointer" }}>
+                            {JOURS.map((j,i) => <option key={i} value={i}>{j}</option>)}
+                          </select>
+                          <input type="number" min="0" max="23" value={f[cle].heure}
+                            onChange={e => {
+                              const next = { ...(fenetresEdit || fenetres) };
+                              next[b.id] = { ...next[b.id], [cle]: { ...next[b.id][cle], heure: Math.min(23,Math.max(0,Number(e.target.value))) } };
+                              setFenetresEdit(next);
+                            }}
+                            style={{ width:44, padding:"5px 6px", border:"1.5px solid #D4A96A", borderRadius:7, background:"#fff", color:"#2C1810", fontSize:11, outline:"none", textAlign:"center" }} />
+                          <span style={{ fontSize:11, color:"#8B4513", fontWeight:700 }}>h</span>
+                          <input type="number" min="0" max="59" value={f[cle].minute}
+                            onChange={e => {
+                              const next = { ...(fenetresEdit || fenetres) };
+                              next[b.id] = { ...next[b.id], [cle]: { ...next[b.id][cle], minute: Math.min(59,Math.max(0,Number(e.target.value))) } };
+                              setFenetresEdit(next);
+                            }}
+                            style={{ width:44, padding:"5px 6px", border:"1.5px solid #D4A96A", borderRadius:7, background:"#fff", color:"#2C1810", fontSize:11, outline:"none", textAlign:"center" }} />
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          <div style={{ display:"flex", gap:10, justifyContent:"flex-end", marginTop:16, paddingTop:14, borderTop:"1px solid #EDD5B3" }}>
+            <button onClick={() => { setShowFenetreConfig(false); setFenetresEdit(null); }} style={{ padding:"9px 18px", borderRadius:9, border:"1.5px solid #D4A96A", background:"#fff", color:"#9B7B5A", cursor:"pointer", fontSize:12, fontWeight:600 }}>Annuler</button>
+            <button onClick={() => { onSaveFenetre(fenetresEdit || fenetres); setShowFenetreConfig(false); setFenetresEdit(null); }}
+              style={{ padding:"9px 20px", borderRadius:9, border:"none", background:"linear-gradient(135deg,#8B4513,#6B3210)", color:"#fff", cursor:"pointer", fontSize:12, fontWeight:700, fontFamily:"Georgia" }}>
+              ✓ Enregistrer
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* Bannière statut fenêtre */}
+    {fenetre !== null && (
+      <div style={{
+        marginBottom:12, padding:"9px 14px", borderRadius:9, fontSize:11, fontWeight:700,
+        background: ouvert ? "#f0fff4" : "#fff5f5",
+        border: `1.5px solid ${ouvert ? "#27ae60" : "#C0392B"}`,
+        color: ouvert ? "#217346" : "#C0392B",
+        display:"flex", justifyContent:"space-between", alignItems:"center"
+      }}>
+        <span>
+          {ouvert ? "✅ Commandes ouvertes" : "🔒 Commandes fermées"} — {JOURS[fenetre.ouverture.jour]} {String(fenetre.ouverture.heure).padStart(2,"0")}h{String(fenetre.ouverture.minute).padStart(2,"0")} → {JOURS[fenetre.fermeture.jour]} {String(fenetre.fermeture.heure).padStart(2,"0")}h{String(fenetre.fermeture.minute).padStart(2,"0")}
+        </span>
+        {isAdmin && <button onClick={() => { setFenetresEdit(null); setShowFenetreConfig(true); }}
+          style={{ marginLeft:12, padding:"3px 10px", borderRadius:6, border:"1.5px solid currentColor", background:"transparent", color:"inherit", cursor:"pointer", fontSize:10, fontWeight:700 }}>
+          ⚙️ Gérer les fenêtres
+        </button>}
+      </div>
+    )}
+    {fenetre === null && isAdmin && (
+      <div style={{ marginBottom:12, textAlign:"right" }}>
+        <button onClick={() => { setFenetresEdit(null); setShowFenetreConfig(true); }}
+          style={{ padding:"5px 12px", borderRadius:7, border:"1.5px solid #D4A96A", background:"#fffaf5", color:"#8B4513", cursor:"pointer", fontSize:11, fontWeight:700 }}>
+          ⚙️ Gérer les fenêtres de commande
+        </button>
+      </div>
+    )}
+
     <div className="commande-layout">
       <div className="commande-products">
         {/* Search + boutons */}
@@ -1351,21 +1519,180 @@ function TabCommande({ cart, setCart, boulangerieId, addToHistory, produits, set
         )}
       </div>
       <div className="commande-cart">
-        <CartPanel cart={cart} setCart={setCart} boulangerieId={boulangerieId} addToHistory={addToHistory} />
+        <CartPanel cart={cart} setCart={setCart} boulangerieId={boulangerieId} addToHistory={addToHistory} isAdmin={isAdmin} fenetre={fenetre} />
       </div>
     </div>
 
     {/* Barre panier fixe mobile */}
-    <MobileCartBar cart={cart} boulangerieId={boulangerieId} setCart={setCart} addToHistory={addToHistory} />
-    {showTriFavoris && (
-      <ModalTriFavoris
-        favoris={favoris}
-        produits={produits}
-        onSave={reordonnerFavoris}
-        onClose={() => setShowTriFavoris(false)}
-      />
-    )}
+    <MobileCartBar cart={cart} boulangerieId={boulangerieId} setCart={setCart} addToHistory={addToHistory} isAdmin={isAdmin} fenetre={fenetre} />
     </>
+  );
+}
+
+// ─── ANNONCES ────────────────────────────────────────────────────────────────
+
+function PopupAnnonce({ annonce, onClose }) {
+  if (!annonce) return null;
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.55)", zIndex:1400, display:"flex", alignItems:"center", justifyContent:"center" }}>
+      <div style={{
+        background:"#fff", borderRadius:16, padding:32, width:500, maxWidth:"92vw",
+        boxShadow:"0 12px 50px rgba(0,0,0,.3)", border:"3px solid #D4A96A",
+        animation:"fadeIn .2s ease"
+      }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:16 }}>
+          <div>
+            <div style={{ fontSize:10, color:"#9B7B5A", fontWeight:700, letterSpacing:1, marginBottom:4, textTransform:"uppercase" }}>
+              📣 Message de la direction
+            </div>
+            <h3 style={{ margin:0, fontFamily:"Georgia", color:"#2C1810", fontSize:18, lineHeight:1.3 }}>
+              {annonce.titre}
+            </h3>
+          </div>
+        </div>
+
+        <div style={{
+          fontSize:13, color:"#2C1810", lineHeight:1.7, whiteSpace:"pre-wrap",
+          background:"#fffaf5", border:"1px solid #EDD5B3", borderRadius:10,
+          padding:"14px 16px", marginBottom:20, minHeight:60
+        }}>
+          {annonce.message}
+        </div>
+
+        {annonce.expiration && (
+          <div style={{ fontSize:10, color:"#9B7B5A", marginBottom:14, textAlign:"right" }}>
+            Valide jusqu'au {annonce.expiration}
+          </div>
+        )}
+
+        <button onClick={onClose}
+          style={{
+            width:"100%", padding:"12px 0", borderRadius:10, border:"none",
+            background:"linear-gradient(135deg,#8B4513,#6B3210)", color:"#fff",
+            cursor:"pointer", fontWeight:700, fontSize:13, fontFamily:"Georgia, serif",
+            boxShadow:"0 3px 12px rgba(139,69,19,.35)"
+          }}>
+          ✓ J'ai lu ce message
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ModalGererAnnonces({ annonces, onSave, onDelete, onClose }) {
+  const [mode, setMode] = useState("liste"); // "liste" | "new"
+  const [titre, setTitre] = useState("");
+  const [message, setMessage] = useState("");
+  const [expiration, setExpiration] = useState("");
+  const [cibles, setCibles] = useState(new Set(BOULANGERIES.map(b => b.id)));
+  const [saving, setSaving] = useState(false);
+
+  const inputStyle = { width:"100%", padding:"8px 12px", border:"1.5px solid #D4A96A", borderRadius:8, background:"#fffaf5", fontSize:12, color:"#2C1810", outline:"none", boxSizing:"border-box", fontFamily:"inherit" };
+
+  const handleSave = async () => {
+    if (!titre.trim() || !message.trim() || !expiration) return;
+    setSaving(true);
+    const annonce = {
+      id: "ANN-" + Date.now(),
+      titre: titre.trim(),
+      message: message.trim(),
+      expiration,
+      cibles: [...cibles],
+      date: new Date().toLocaleDateString("fr-FR"),
+    };
+    await onSave(annonce);
+    setSaving(false);
+    setMode("liste");
+    setTitre(""); setMessage(""); setExpiration(""); setCibles(new Set(BOULANGERIES.map(b => b.id)));
+  };
+
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.55)", zIndex:1300, display:"flex", alignItems:"center", justifyContent:"center" }}>
+      <div style={{ background:"#fff", borderRadius:14, padding:28, width:520, maxWidth:"95vw", maxHeight:"90vh", display:"flex", flexDirection:"column", boxShadow:"0 8px 40px rgba(0,0,0,.25)", border:"2px solid #D4A96A" }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:18 }}>
+          <h3 style={{ margin:0, fontFamily:"Georgia", color:"#2C1810", fontSize:15 }}>📣 Gérer les annonces</h3>
+          <button onClick={onClose} style={{ background:"none", border:"none", fontSize:20, cursor:"pointer", color:"#9B7B5A" }}>✕</button>
+        </div>
+
+        {mode === "liste" ? (
+          <>
+            <button onClick={() => setMode("new")}
+              style={{ marginBottom:16, padding:"9px 18px", borderRadius:9, border:"none", background:"linear-gradient(135deg,#8B4513,#6B3210)", color:"#fff", cursor:"pointer", fontSize:12, fontWeight:700, fontFamily:"Georgia", alignSelf:"flex-start" }}>
+              ✚ Nouvelle annonce
+            </button>
+            {annonces.length === 0 ? (
+              <div style={{ textAlign:"center", padding:30, color:"#b89878", fontSize:12 }}>Aucune annonce active</div>
+            ) : (
+              <div style={{ flex:1, overflowY:"auto", display:"flex", flexDirection:"column", gap:10 }}>
+                {annonces.map(a => {
+                  const expiree = a.expiration && new Date(a.expiration) < new Date();
+                  return (
+                    <div key={a.id} style={{ border:`1.5px solid ${expiree ? "#ddd" : "#D4A96A"}`, borderRadius:10, padding:"12px 14px", background: expiree ? "#fafafa" : "#fffaf5", opacity: expiree ? 0.6 : 1 }}>
+                      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:8 }}>
+                        <div style={{ flex:1 }}>
+                          <div style={{ fontSize:13, fontWeight:700, color:"#2C1810", fontFamily:"Georgia", marginBottom:3 }}>{a.titre}</div>
+                          <div style={{ fontSize:11, color:"#555", marginBottom:6, lineHeight:1.5 }}>{a.message.substring(0,100)}{a.message.length > 100 ? "…" : ""}</div>
+                          <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+                            <span style={{ fontSize:10, color:"#9B7B5A" }}>📅 Expire le {a.expiration}</span>
+                            <span style={{ fontSize:10, color: expiree ? "#C0392B" : "#217346", fontWeight:700 }}>{expiree ? "⚠ Expirée" : "✅ Active"}</span>
+                          </div>
+                          <div style={{ fontSize:10, color:"#9B7B5A", marginTop:4 }}>
+                            Cibles : {a.cibles?.length === BOULANGERIES.length ? "Toutes" : a.cibles?.map(id => BOULANGERIES.find(b => b.id === id)?.name.replace("Pense Au Pain ","")).join(", ")}
+                          </div>
+                        </div>
+                        <button onClick={() => onDelete(a.id)}
+                          style={{ padding:"4px 10px", borderRadius:7, border:"1.5px solid #e74c3c", background:"#fff5f5", color:"#c0392b", cursor:"pointer", fontSize:11, fontWeight:700, flexShrink:0 }}>
+                          🗑 Supprimer
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </>
+        ) : (
+          <div style={{ flex:1, overflowY:"auto", display:"flex", flexDirection:"column", gap:14 }}>
+            <div>
+              <label style={{ fontSize:11, fontWeight:700, color:"#8B4513", display:"block", marginBottom:4 }}>Titre *</label>
+              <input value={titre} onChange={e => setTitre(e.target.value)} placeholder="Ex: Fermeture exceptionnelle lundi" style={inputStyle} autoFocus />
+            </div>
+            <div>
+              <label style={{ fontSize:11, fontWeight:700, color:"#8B4513", display:"block", marginBottom:4 }}>Message *</label>
+              <textarea value={message} onChange={e => setMessage(e.target.value)} rows={5}
+                placeholder="Écrivez votre message ici…"
+                style={{ ...inputStyle, resize:"vertical" }} />
+            </div>
+            <div>
+              <label style={{ fontSize:11, fontWeight:700, color:"#8B4513", display:"block", marginBottom:4 }}>Date d'expiration *</label>
+              <input type="date" value={expiration} onChange={e => setExpiration(e.target.value)} style={inputStyle} min={new Date().toISOString().split("T")[0]} />
+            </div>
+            <div>
+              <label style={{ fontSize:11, fontWeight:700, color:"#8B4513", display:"block", marginBottom:8 }}>Destinataires</label>
+              <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+                <button onClick={() => setCibles(new Set(BOULANGERIES.map(b => b.id)))}
+                  style={{ fontSize:10, padding:"3px 10px", borderRadius:6, border:"1px solid #D4A96A", background: cibles.size === BOULANGERIES.length ? "#8B4513" : "#fffaf5", color: cibles.size === BOULANGERIES.length ? "#fff" : "#8B4513", cursor:"pointer", fontWeight:700 }}>
+                  Toutes
+                </button>
+                {BOULANGERIES.map(b => (
+                  <button key={b.id} onClick={() => setCibles(prev => { const n = new Set(prev); n.has(b.id) ? n.delete(b.id) : n.add(b.id); return n; })}
+                    style={{ fontSize:10, padding:"3px 10px", borderRadius:6, border:"1px solid #D4A96A", background: cibles.has(b.id) ? "#8B4513" : "#fffaf5", color: cibles.has(b.id) ? "#fff" : "#8B4513", cursor:"pointer", fontWeight:700 }}>
+                    {b.name.replace("Pense Au Pain ","")}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div style={{ display:"flex", gap:10, marginTop:6 }}>
+              <button onClick={() => setMode("liste")} style={{ flex:1, padding:"9px 0", borderRadius:9, border:"1.5px solid #D4A96A", background:"#fff", color:"#9B7B5A", cursor:"pointer", fontSize:12, fontWeight:600 }}>Annuler</button>
+              <button onClick={handleSave} disabled={!titre.trim() || !message.trim() || !expiration || cibles.size === 0 || saving}
+                style={{ flex:2, padding:"9px 0", borderRadius:9, border:"none", background: titre && message && expiration && cibles.size > 0 ? "linear-gradient(135deg,#8B4513,#6B3210)" : "#ccc", color:"#fff", cursor: titre && message && expiration ? "pointer" : "default", fontSize:12, fontWeight:700, fontFamily:"Georgia" }}>
+                {saving ? "⏳ Envoi…" : "📣 Publier l'annonce"}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -2367,7 +2694,7 @@ function TabEmballages({ emballages, boulangerieId, isAdmin, onAjouter, onModifi
   );
 }
 
-function TabHistorique({ history, onUpdateStatus, onUpdateCommande, onAddCommande, isAdmin }) {
+function TabHistorique({ history, onUpdateStatus, onUpdateCommande, onAddCommande, isAdmin, fenetres }) {
   const [filterB, setFilterB] = useState("Tous");
   const [filterStatus, setFilterStatus] = useState("Tous");
   const [filterType, setFilterType] = useState("Tous");
@@ -2625,11 +2952,19 @@ function TabHistorique({ history, onUpdateStatus, onUpdateCommande, onAddCommand
                     onMouseLeave={e => { e.currentTarget.style.background="#fffaf5"; e.currentTarget.style.color="#8B4513"; }}
                   >👁 Voir</button>
 
-                  <button onClick={() => setCmdModif(cmd)}
-                    style={{ flex:1, minWidth:80, padding:"7px 6px", borderRadius:7, border:"1.5px solid #A0B0D0", background:"#f0f4ff", color:"#3A5A9B", cursor:"pointer", fontSize:11, fontWeight:700, transition:"all .15s" }}
-                    onMouseEnter={e => { e.currentTarget.style.background="#3A5A9B"; e.currentTarget.style.color="#fff"; }}
-                    onMouseLeave={e => { e.currentTarget.style.background="#f0f4ff"; e.currentTarget.style.color="#3A5A9B"; }}
-                  >✏️ Modifier</button>
+                  {(() => {
+                    const boulId = BOULANGERIES.find(b => b.name === cmd.boulangerie)?.id;
+                    const f = getFenetrePour(fenetres, boulId);
+                    const peutModifier = isAdmin || f === null || commandeOuverte(f);
+                    return (
+                      <button onClick={() => peutModifier && setCmdModif(cmd)}
+                        style={{ flex:1, minWidth:80, padding:"7px 6px", borderRadius:7, border:`1.5px solid ${peutModifier ? "#A0B0D0" : "#ccc"}`, background: peutModifier ? "#f0f4ff" : "#f5f5f5", color: peutModifier ? "#3A5A9B" : "#aaa", cursor: peutModifier ? "pointer" : "not-allowed", fontSize:11, fontWeight:700, transition:"all .15s" }}
+                        onMouseEnter={e => { if(peutModifier) { e.currentTarget.style.background="#3A5A9B"; e.currentTarget.style.color="#fff"; }}}
+                        onMouseLeave={e => { if(peutModifier) { e.currentTarget.style.background="#f0f4ff"; e.currentTarget.style.color="#3A5A9B"; }}}
+                        title={!peutModifier ? "Commandes fermées" : ""}
+                      >{peutModifier ? "✏️ Modifier" : "🔒 Modifier"}</button>
+                    );
+                  })()}
 
                   {cmd.status === "Archivé" ? (
                     <button
@@ -4218,6 +4553,10 @@ export default function App() {
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState(false);
   const [litiges, setLitiges] = useState([]);
+  const [fenetres, setFenetres] = useState(FENETRES_DEFAULT);
+  const [annonces, setAnnonces] = useState([]);
+  const [annonceActive, setAnnonceActive] = useState(null);
+  const [showGererAnnonces, setShowGererAnnonces] = useState(false);
 
   // ── Mercuriale ──
   const [produits, setProduits] = useState(ALL_PRODUCTS);
@@ -4412,6 +4751,8 @@ export default function App() {
     chargerFavoris(compteChoisi.boulangerieId);
     chargerBrouillon(compteChoisi.boulangerieId);
     chargerLitiges();
+    chargerFenetre();
+    chargerAnnonces(compteChoisi.boulangerieId);
   };
 
   if (!compte) return <LoginScreen onLogin={handleLogin} />;
@@ -4497,6 +4838,50 @@ export default function App() {
     } catch(e) { console.error("Erreur chargement litiges", e); }
   };
 
+  const chargerFenetre = async () => {
+    try {
+      const res = await fetch(SHEETS_URL + "?action=getFenetre");
+      const data = JSON.parse(await res.text());
+      if (data.success && data.fenetres) setFenetres(data.fenetres);
+    } catch(e) { console.error("Erreur chargement fenêtres", e); }
+  };
+
+  const saveFenetre = async (newFenetres) => {
+    setFenetres(newFenetres);
+    try {
+      await postToSheets(SHEETS_URL, { action: "saveFenetre", fenetres: newFenetres });
+    } catch(e) { console.error("Erreur sauvegarde fenêtres", e); }
+  };
+
+  const chargerAnnonces = async (boulId) => {
+    try {
+      const res = await fetch(SHEETS_URL + "?action=getAnnonces");
+      const data = JSON.parse(await res.text());
+      if (!data.success) return;
+      const today = new Date().toISOString().split("T")[0];
+      const actives = (data.annonces || []).filter(a =>
+        a.expiration >= today &&
+        (!a.cibles || a.cibles.includes(boulId) || a.cibles.includes(String(boulId)))
+      );
+      setAnnonces(data.annonces || []);
+      if (actives.length > 0) setAnnonceActive(actives[0]);
+    } catch(e) { console.error("Erreur chargement annonces", e); }
+  };
+
+  const saveAnnonce = async (annonce) => {
+    setAnnonces(prev => [annonce, ...prev]);
+    try {
+      await postToSheets(SHEETS_URL, { action: "saveAnnonce", annonce });
+    } catch(e) { console.error("Erreur sauvegarde annonce", e); }
+  };
+
+  const deleteAnnonce = async (id) => {
+    setAnnonces(prev => prev.filter(a => a.id !== id));
+    try {
+      await postToSheets(SHEETS_URL, { action: "deleteAnnonce", id });
+    } catch(e) { console.error("Erreur suppression annonce", e); }
+  };
+
   const saveLitige = async (litige) => {
     setLitiges(prev => [litige, ...prev]);
     try {
@@ -4574,12 +4959,40 @@ export default function App() {
             title="Rafraîchir les commandes"
           >{loading ? "⏳" : "🔄"}</button>
 
+          {isAdmin && (
+            <button onClick={() => setShowGererAnnonces(true)}
+              style={{ padding:"7px 12px", borderRadius:9, border:"1.5px solid #D4A96A", background:"#fff", color:"#8B4513", cursor:"pointer", fontSize:11, fontWeight:700, whiteSpace:"nowrap", flexShrink:0, position:"relative" }}
+              title="Gérer les annonces">
+              📣 <span className="pap-header-btn-text">Annonces</span>
+              {annonces.filter(a => a.expiration >= new Date().toISOString().split("T")[0]).length > 0 && (
+                <span style={{ position:"absolute", top:-4, right:-4, background:"#C0392B", color:"#fff", borderRadius:10, fontSize:9, fontWeight:800, padding:"1px 5px" }}>
+                  {annonces.filter(a => a.expiration >= new Date().toISOString().split("T")[0]).length}
+                </span>
+              )}
+            </button>
+          )}
+
           <button onClick={() => { setCompte(null); setBoulangerieId(null); setHistory([]); setCart([]); }}
             style={{ padding:"7px 12px", borderRadius:9, border:"1.5px solid #D4A96A", background:"#fff", color:"#9B7B5A", cursor:"pointer", fontSize:11, fontWeight:600, whiteSpace:"nowrap", flexShrink:0 }}
             title="Se déconnecter"
           >🔒 <span className="pap-header-btn-text">Déconnexion</span></button>
         </div>
       </div>
+
+      {/* Popup annonce */}
+      {annonceActive && (
+        <PopupAnnonce annonce={annonceActive} onClose={() => setAnnonceActive(null)} />
+      )}
+
+      {/* Modale gestion annonces admin */}
+      {showGererAnnonces && (
+        <ModalGererAnnonces
+          annonces={annonces}
+          onSave={saveAnnonce}
+          onDelete={deleteAnnonce}
+          onClose={() => setShowGererAnnonces(false)}
+        />
+      )}
 
       {/* Bannière brouillon matières premières */}
       {brouillon && Array.isArray(brouillon) && brouillon.length > 0 && cart.length === 0 && (
@@ -4642,11 +5055,11 @@ export default function App() {
       <div className="pap-content">
         <div className="pap-card-inner" style={{ background:"#fff", borderRadius:14, boxShadow:"0 2px 14px rgba(139,69,19,.07)", border:"1px solid #EDD5B3", minHeight:400 }}>
           {tab==="dashboard"   && <TabDashboard history={historyVisible} />}
-          {tab==="commande"    && <TabCommande cart={cart} setCart={setCartWithSave} boulangerieId={boulangerieId} addToHistory={addToHistory} produits={produits} setProduits={setProduits} favoris={favoris} toggleFavori={toggleFavori} reordonnerFavoris={reordonnerFavoris} history={history} />}
+          {tab==="commande"    && <TabCommande cart={cart} setCart={setCartWithSave} boulangerieId={boulangerieId} addToHistory={addToHistory} produits={produits} setProduits={setProduits} favoris={favoris} toggleFavori={toggleFavori} reordonnerFavoris={reordonnerFavoris} history={history} isAdmin={isAdmin} fenetres={fenetres} onSaveFenetre={saveFenetre} />}
           {tab==="emballages"  && <TabEmballages emballages={emballages} boulangerieId={boulangerieId} isAdmin={isAdmin} onAjouter={ajouterEmballage} onModifierStock={modifierStockEmb} onCommander={passerCommandeEmb} />}
           {tab==="patisserie"  && <TabPatisserie boulangerieId={boulangerieId} compte={compte} isAdmin={isAdmin} />}
           {tab==="coutmatiere" && <TabCoutMatiere boulangerieId={boulangerieId} isAdmin={isAdmin} produits={produits} />}
-          {tab==="historique"  && <TabHistorique history={historyVisible} onUpdateStatus={updateStatus} onUpdateCommande={updateCommande} onAddCommande={addToHistory} isAdmin={isAdmin} />}
+          {tab==="historique"  && <TabHistorique history={historyVisible} onUpdateStatus={updateStatus} onUpdateCommande={updateCommande} onAddCommande={addToHistory} isAdmin={isAdmin} fenetres={fenetres} />}
           {tab==="litiges"     && <TabLitiges litiges={litiges} boulangerieId={boulangerieId} isAdmin={isAdmin} onSave={saveLitige} onUpdateStatus={updateLitigeStatus} onAddCommentaire={addLitigeCommentaire} />}
         </div>
       </div>
