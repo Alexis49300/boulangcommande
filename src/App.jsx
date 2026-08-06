@@ -4861,7 +4861,8 @@ export default function App() {
       const today = new Date().toISOString().split("T")[0];
       const actives = (data.annonces || []).filter(a =>
         a.expiration >= today &&
-        (!a.cibles || a.cibles.includes(boulId) || a.cibles.includes(String(boulId)))
+        (!a.cibles || a.cibles.length === 0 ||
+          a.cibles.map(c => Number(c)).includes(Number(boulId)))
       );
       setAnnonces(data.annonces || []);
       if (actives.length > 0) setAnnonceActive(actives[0]);
