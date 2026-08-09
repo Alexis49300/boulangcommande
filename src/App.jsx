@@ -3333,6 +3333,17 @@ const normalizeTxt = (s) => (s || "")
   .replace(/\s+/g, " ")
   .trim();
 
+// Renvoie le prix HT d'un produit mercuriale POUR UN FOURNISSEUR DONNÉ,
+// ou null si ce produit n'est pas référencé chez ce fournisseur.
+const getPrixPourFournisseur = (p, fournisseur) => {
+  if (!p || !fournisseur) return null;
+  if (p.four === fournisseur) return p.prix_ht;
+  if (p.prix_fournisseurs && typeof p.prix_fournisseurs[fournisseur] === "number") {
+    return p.prix_fournisseurs[fournisseur];
+  }
+  return null;
+};
+
 // Score de similarité entre une ligne de facture et un produit mercuriale.
 // Référence identique = score maximal. Sinon, proportion de mots communs.
 const scoreMatchProduit = (ligneName, ligneRef, p) => {
@@ -3347,14 +3358,16 @@ const scoreMatchProduit = (ligneName, ligneRef, p) => {
 
 // Retourne les meilleurs produits mercuriale correspondant à une recherche texte
 // (ou aux mots de la ligne facturée si recherche vide), triés par pertinence.
-const suggestProduits = (produits, ligneName, ligneRef, recherche, limit = 8) => {
+// Ne retient QUE les produits référencés chez le fournisseur donné.
+const suggestProduits = (produits, ligneName, ligneRef, recherche, fournisseur, limit = 8) => {
+  const disponiblesChezFournisseur = produits.filter(p => getPrixPourFournisseur(p, fournisseur) !== null);
   const q = normalizeTxt(recherche);
-  let candidats = produits;
   if (q) {
-    candidats = produits.filter(p => normalizeTxt(p.name).includes(q) || (p.ref && p.ref.toLowerCase().includes(q)));
-    return candidats.slice(0, limit);
+    return disponiblesChezFournisseur
+      .filter(p => normalizeTxt(p.name).includes(q) || (p.ref && p.ref.toLowerCase().includes(q)))
+      .slice(0, limit);
   }
-  return produits
+  return disponiblesChezFournisseur
     .map(p => ({ p, score: scoreMatchProduit(ligneName, ligneRef, p) }))
     .filter(x => x.score > 0)
     .sort((x, y) => y.score - x.score)
@@ -3425,9 +3438,10 @@ function TabVerifFactures({ produits }) {
       if (!data.success) throw new Error(data.error || "Erreur backend inconnue");
       const parsed = data.lignes;
 
-      // Comparer avec mercuriale (meilleure correspondance suggérée automatiquement)
+      // Comparer avec mercuriale (meilleure correspondance suggérée automatiquement,
+      // uniquement parmi les produits référencés chez ce fournisseur)
       const result = parsed.map(l => {
-        const [meilleur] = suggestProduits(produits, l.name, l.ref, "", 1);
+        const [meilleur] = suggestProduits(produits, l.name, l.ref, "", fournisseur, 1);
         return recalcLigneFacture(l, meilleur || null);
       });
 
@@ -3443,9 +3457,10 @@ function TabVerifFactures({ produits }) {
     }
   };
 
-  // Recalcule prix/écart/statut d'une ligne facture à partir du produit mercuriale associé
+  // Recalcule prix/écart/statut d'une ligne facture à partir du produit mercuriale associé,
+  // en utilisant EXCLUSIVEMENT le tarif de ce produit chez le fournisseur sélectionné.
   const recalcLigneFacture = (l, merc) => {
-    const prixMerc = merc ? merc.prix_ht : null;
+    const prixMerc = merc ? getPrixPourFournisseur(merc, fournisseur) : null;
     const ecartUnit = prixMerc !== null ? l.prix - prixMerc : null;
     const ecartTotal = ecartUnit !== null ? ecartUnit * l.qty : null;
     let statut = "inconnu";
@@ -3646,6 +3661,7 @@ function TabVerifFactures({ produits }) {
         <ModalAssocierProduit
           ligne={lignes[matchIndex]}
           produits={produits}
+          fournisseur={fournisseur}
           recherche={matchSearch}
           setRecherche={setMatchSearch}
           onChoisir={(p) => associerProduit(matchIndex, p)}
@@ -3658,8 +3674,8 @@ function TabVerifFactures({ produits }) {
 }
 
 // ── Modal : associer une ligne de facture à un produit de la mercuriale ───────
-function ModalAssocierProduit({ ligne, produits, recherche, setRecherche, onChoisir, onDissocier, onClose }) {
-  const suggestions = suggestProduits(produits, ligne.name, ligne.ref, recherche, 8);
+function ModalAssocierProduit({ ligne, produits, fournisseur, recherche, setRecherche, onChoisir, onDissocier, onClose }) {
+  const suggestions = suggestProduits(produits, ligne.name, ligne.ref, recherche, fournisseur, 8);
   return (
     <div onClick={onClose} style={{
       position:"fixed", inset:0, background:"rgba(44,24,16,.45)", zIndex:500,
@@ -3703,14 +3719,18 @@ function ModalAssocierProduit({ ligne, produits, recherche, setRecherche, onChoi
             >
               <div style={{ minWidth:0 }}>
                 <div style={{ fontSize:12, fontWeight:600, color:"#2C1810", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{p.name}</div>
-                <div style={{ fontSize:10, color:"#9B7B5A" }}>{p.ref || "sans réf."} · {p.four || ""}</div>
+                <div style={{ fontSize:10, color:"#9B7B5A" }}>{p.ref || "sans réf."}</div>
               </div>
-              <div style={{ fontSize:12, fontWeight:700, color:"#8B4513", whiteSpace:"nowrap" }}>{Number(p.prix_ht).toFixed(2).replace(".",",")} €</div>
+              <div style={{ fontSize:12, fontWeight:700, color:"#8B4513", whiteSpace:"nowrap" }}>{Number(getPrixPourFournisseur(p, fournisseur)).toFixed(2).replace(".",",")} €</div>
             </div>
           ))}
           {suggestions.length === 0 && (
-            <div style={{ padding:"1.5rem", textAlign:"center", color:"#9B7B5A", fontSize:12 }}>Aucun résultat.</div>
+            <div style={{ padding:"1.5rem", textAlign:"center", color:"#9B7B5A", fontSize:12 }}>Aucun produit de ce fournisseur ne correspond.</div>
           )}
+        </div>
+
+        <div style={{ fontSize:10, color:"#9B7B5A", marginTop:8 }}>
+          Seuls les produits référencés chez <strong>{fournisseur}</strong> sont proposés.
         </div>
 
         <div style={{ display:"flex", justifyContent:"space-between", gap:8, marginTop:12 }}>
