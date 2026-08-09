@@ -3325,6 +3325,43 @@ const FOURNISSEURS_FACTURES = [
   "Richard Distribution", "Minoterie Girardeau"
 ];
 
+// ── Correspondance intelligente facture ↔ mercuriale ──────────────────────────
+const normalizeTxt = (s) => (s || "")
+  .toLowerCase()
+  .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+  .replace(/[^a-z0-9 ]/g, " ")
+  .replace(/\s+/g, " ")
+  .trim();
+
+// Score de similarité entre une ligne de facture et un produit mercuriale.
+// Référence identique = score maximal. Sinon, proportion de mots communs.
+const scoreMatchProduit = (ligneName, ligneRef, p) => {
+  if (ligneRef && p.ref && ligneRef.toLowerCase() === p.ref.toLowerCase()) return 1000;
+  const a = normalizeTxt(ligneName).split(" ").filter(w => w.length > 2);
+  const b = normalizeTxt(p.name).split(" ").filter(w => w.length > 2);
+  if (a.length === 0 || b.length === 0) return 0;
+  const setB = new Set(b);
+  const communs = a.filter(w => setB.has(w)).length;
+  return communs / Math.max(a.length, b.length);
+};
+
+// Retourne les meilleurs produits mercuriale correspondant à une recherche texte
+// (ou aux mots de la ligne facturée si recherche vide), triés par pertinence.
+const suggestProduits = (produits, ligneName, ligneRef, recherche, limit = 8) => {
+  const q = normalizeTxt(recherche);
+  let candidats = produits;
+  if (q) {
+    candidats = produits.filter(p => normalizeTxt(p.name).includes(q) || (p.ref && p.ref.toLowerCase().includes(q)));
+    return candidats.slice(0, limit);
+  }
+  return produits
+    .map(p => ({ p, score: scoreMatchProduit(ligneName, ligneRef, p) }))
+    .filter(x => x.score > 0)
+    .sort((x, y) => y.score - x.score)
+    .slice(0, limit)
+    .map(x => x.p);
+};
+
 function TabVerifFactures({ produits }) {
   const [step, setStep] = useState("upload"); // upload | loading | result
   const [fournisseur, setFournisseur] = useState("");
@@ -3332,6 +3369,8 @@ function TabVerifFactures({ produits }) {
   const [lignes, setLignes] = useState([]);
   const [filename, setFilename] = useState("");
   const [filter, setFilter] = useState("tous");
+  const [matchIndex, setMatchIndex] = useState(null); // index de la ligne en cours d'association
+  const [matchSearch, setMatchSearch] = useState("");
   const fileInputRef = useRef(null);
 
   const handleFile = async (e) => {
@@ -3386,24 +3425,10 @@ function TabVerifFactures({ produits }) {
       if (!data.success) throw new Error(data.error || "Erreur backend inconnue");
       const parsed = data.lignes;
 
-      // Comparer avec mercuriale
+      // Comparer avec mercuriale (meilleure correspondance suggérée automatiquement)
       const result = parsed.map(l => {
-        // Chercher dans la mercuriale par ref ou nom
-        const merc = produits.find(p =>
-          (l.ref && p.ref && p.ref.toLowerCase() === l.ref.toLowerCase()) ||
-          p.name.toLowerCase().includes(l.name.toLowerCase().split(" ")[0].toLowerCase()) ||
-          l.name.toLowerCase().includes(p.name.toLowerCase().split(" ")[0].toLowerCase())
-        );
-        const prixMerc = merc ? merc.prix_ht : null;
-        const ecartUnit = prixMerc !== null ? l.prix - prixMerc : null;
-        const ecartTotal = ecartUnit !== null ? ecartUnit * l.qty : null;
-        let statut = "inconnu";
-        if (prixMerc !== null) {
-          if (Math.abs(ecartUnit) < 0.005) statut = "ok";
-          else if (ecartUnit > 0) statut = "surcharge";
-          else statut = "remise";
-        }
-        return { ...l, prixMerc, ecartUnit, ecartTotal, statut };
+        const [meilleur] = suggestProduits(produits, l.name, l.ref, "", 1);
+        return recalcLigneFacture(l, meilleur || null);
       });
 
       setLignes(result);
@@ -3418,12 +3443,34 @@ function TabVerifFactures({ produits }) {
     }
   };
 
-  const lignesFiltrees = lignes.filter(l => {
-    if (filter === "ecart") return l.statut === "surcharge" || l.statut === "remise";
-    if (filter === "ok") return l.statut === "ok";
-    if (filter === "inconnu") return l.statut === "inconnu";
-    return true;
-  });
+  // Recalcule prix/écart/statut d'une ligne facture à partir du produit mercuriale associé
+  const recalcLigneFacture = (l, merc) => {
+    const prixMerc = merc ? merc.prix_ht : null;
+    const ecartUnit = prixMerc !== null ? l.prix - prixMerc : null;
+    const ecartTotal = ecartUnit !== null ? ecartUnit * l.qty : null;
+    let statut = "inconnu";
+    if (prixMerc !== null) {
+      if (Math.abs(ecartUnit) < 0.005) statut = "ok";
+      else if (ecartUnit > 0) statut = "surcharge";
+      else statut = "remise";
+    }
+    return { ...l, merc, prixMerc, ecartUnit, ecartTotal, statut };
+  };
+
+  const associerProduit = (idx, produit) => {
+    setLignes(prev => prev.map((l, i) => i === idx ? recalcLigneFacture(l, produit) : l));
+    setMatchIndex(null);
+    setMatchSearch("");
+  };
+
+  const lignesFiltrees = lignes
+    .map((l, i) => ({ ...l, origIndex: i }))
+    .filter(l => {
+      if (filter === "ecart") return l.statut === "surcharge" || l.statut === "remise";
+      if (filter === "ok") return l.statut === "ok";
+      if (filter === "inconnu") return l.statut === "inconnu";
+      return true;
+    });
 
   const totalFacture = lignes.reduce((s, l) => s + l.prix * l.qty, 0);
   const totalAttendu = lignes.reduce((s, l) => s + (l.prixMerc !== null ? l.prixMerc * l.qty : l.prix * l.qty), 0);
@@ -3550,12 +3597,23 @@ function TabVerifFactures({ produits }) {
                   const badge = badgeStatut(l.statut);
                   const rowBg = l.statut==="surcharge" ? "#FCEBEB" : l.statut==="remise" ? "#FFF8E1" : i%2===0?"#fffaf5":"#fff";
                   return (
-                    <tr key={i} style={{ background:rowBg, borderTop:"1px solid #EDD5B3" }}>
+                    <tr key={l.origIndex} style={{ background:rowBg, borderTop:"1px solid #EDD5B3" }}>
                       <td style={{ padding:"7px 12px", fontFamily:"monospace", fontSize:11, color:"#8B4513" }}>{l.ref || "—"}</td>
                       <td style={{ padding:"7px 12px", color:"#2C1810", fontWeight:600 }}>{l.name}</td>
                       <td style={{ padding:"7px 12px", textAlign:"right", color:"#2C1810" }}>{l.qty}</td>
                       <td style={{ padding:"7px 12px", textAlign:"right", fontWeight:700, color:"#2C1810" }}>{fmt(l.prix)}</td>
-                      <td style={{ padding:"7px 12px", textAlign:"right", color:"#9B7B5A" }}>{l.prixMerc !== null ? fmt(l.prixMerc) : "—"}</td>
+                      <td style={{ padding:"7px 12px", textAlign:"right" }}>
+                        <div
+                          onClick={() => { setMatchIndex(l.origIndex); setMatchSearch(""); }}
+                          title="Cliquer pour changer le produit associé"
+                          style={{ cursor:"pointer", display:"inline-block" }}
+                        >
+                          <div style={{ color:"#9B7B5A" }}>{l.prixMerc !== null ? fmt(l.prixMerc) : "—"}</div>
+                          <div style={{ fontSize:10, color: l.merc ? "#B08D57" : "#c0392b", textDecoration:"underline", maxWidth:160, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>
+                            {l.merc ? l.merc.name : "🔍 Associer un produit"}
+                          </div>
+                        </div>
+                      </td>
                       <td style={{ padding:"7px 12px", textAlign:"right", fontWeight:700, color:l.ecartUnit>0.005?"#791F1F":l.ecartUnit<-0.005?"#27500A":"#9B7B5A" }}>
                         {l.ecartUnit !== null ? (l.ecartUnit>=0?"+":"") + l.ecartUnit.toFixed(3).replace(".",",")+" €" : "—"}
                       </td>
@@ -3578,10 +3636,92 @@ function TabVerifFactures({ produits }) {
           </div>
 
           <div style={{ marginTop:10, fontSize:11, color:"#9B7B5A" }}>
-            Les articles "Non trouvés" ne sont pas dans votre mercuriale actuelle — pensez à la mettre à jour.
+            Les articles "Non trouvés" ne sont pas dans votre mercuriale actuelle — cliquez sur "🔍 Associer un produit" pour les rattacher manuellement, ou pensez à mettre à jour votre mercuriale.
           </div>
         </>
       )}
+
+      {/* Modal d'association manuelle produit facture ↔ mercuriale */}
+      {matchIndex !== null && (
+        <ModalAssocierProduit
+          ligne={lignes[matchIndex]}
+          produits={produits}
+          recherche={matchSearch}
+          setRecherche={setMatchSearch}
+          onChoisir={(p) => associerProduit(matchIndex, p)}
+          onDissocier={() => associerProduit(matchIndex, null)}
+          onClose={() => { setMatchIndex(null); setMatchSearch(""); }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── Modal : associer une ligne de facture à un produit de la mercuriale ───────
+function ModalAssocierProduit({ ligne, produits, recherche, setRecherche, onChoisir, onDissocier, onClose }) {
+  const suggestions = suggestProduits(produits, ligne.name, ligne.ref, recherche, 8);
+  return (
+    <div onClick={onClose} style={{
+      position:"fixed", inset:0, background:"rgba(44,24,16,.45)", zIndex:500,
+      display:"flex", alignItems:"center", justifyContent:"center", padding:16
+    }}>
+      <div onClick={e => e.stopPropagation()} style={{
+        background:"#fff", borderRadius:14, padding:20, width:"100%", maxWidth:460,
+        maxHeight:"80vh", display:"flex", flexDirection:"column", boxShadow:"0 8px 30px rgba(0,0,0,.2)"
+      }}>
+        <div style={{ fontSize:14, fontWeight:700, color:"#2C1810", fontFamily:"Georgia", marginBottom:4 }}>
+          Associer un produit mercuriale
+        </div>
+        <div style={{ fontSize:12, color:"#9B7B5A", marginBottom:12 }}>
+          Ligne facture : <strong>{ligne.name}</strong> {ligne.ref ? `(réf. ${ligne.ref})` : ""}
+        </div>
+
+        <input
+          autoFocus
+          value={recherche}
+          onChange={e => setRecherche(e.target.value)}
+          placeholder="Rechercher un produit par nom ou référence…"
+          style={{ padding:"8px 12px", border:"2px solid #D4A96A", borderRadius:8, fontSize:13, marginBottom:10, outline:"none" }}
+        />
+
+        {!recherche && (
+          <div style={{ fontSize:10, color:"#9B7B5A", marginBottom:6, fontWeight:700, textTransform:"uppercase" }}>
+            Suggestions (triées par pertinence)
+          </div>
+        )}
+
+        <div style={{ overflowY:"auto", flex:1, border:"1px solid #EDD5B3", borderRadius:8 }}>
+          {suggestions.map((p, i) => (
+            <div key={p.ref + "|" + p.name + "|" + i}
+              onClick={() => onChoisir(p)}
+              style={{
+                padding:"9px 12px", cursor:"pointer", borderBottom:"1px solid #F2E6D3",
+                display:"flex", justifyContent:"space-between", alignItems:"center", gap:8
+              }}
+              onMouseEnter={e => e.currentTarget.style.background = "#FAF0E4"}
+              onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+            >
+              <div style={{ minWidth:0 }}>
+                <div style={{ fontSize:12, fontWeight:600, color:"#2C1810", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{p.name}</div>
+                <div style={{ fontSize:10, color:"#9B7B5A" }}>{p.ref || "sans réf."} · {p.four || ""}</div>
+              </div>
+              <div style={{ fontSize:12, fontWeight:700, color:"#8B4513", whiteSpace:"nowrap" }}>{Number(p.prix_ht).toFixed(2).replace(".",",")} €</div>
+            </div>
+          ))}
+          {suggestions.length === 0 && (
+            <div style={{ padding:"1.5rem", textAlign:"center", color:"#9B7B5A", fontSize:12 }}>Aucun résultat.</div>
+          )}
+        </div>
+
+        <div style={{ display:"flex", justifyContent:"space-between", gap:8, marginTop:12 }}>
+          <button onClick={onDissocier} style={{ padding:"6px 12px", borderRadius:7, border:"1px solid #ccc", background:"#fff", color:"#999", cursor:"pointer", fontSize:12 }}>
+            Dissocier
+          </button>
+          <button onClick={onClose} style={{ padding:"6px 14px", borderRadius:7, border:"none", background:"#8B4513", color:"#fff", cursor:"pointer", fontSize:12, fontWeight:700 }}>
+            Fermer
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
