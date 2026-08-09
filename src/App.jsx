@@ -3367,43 +3367,24 @@ function TabVerifFactures({ produits }) {
         reader.readAsDataURL(file);
       });
 
-      // Appel Claude API avec le PDF
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
+      // Appel au backend (Apps Script) qui relaie vers l'API Claude
+      // NB: Content-Type "text/plain" volontaire pour éviter le preflight CORS
+      // (Apps Script ne répond pas aux requêtes OPTIONS).
+      const response = await fetch(SHEETS_URL, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
         body: JSON.stringify({
-          model: "claude-sonnet-4-6",
-          max_tokens: 2000,
-          messages: [{
-            role: "user",
-            content: [
-              {
-                type: "document",
-                source: { type: "base64", media_type: "application/pdf", data: base64 }
-              },
-              {
-                type: "text",
-                text: `Tu es un assistant de vérification de factures. Analyse cette facture du fournisseur "${fournisseur}" et extrait TOUTES les lignes de produits.
-
-Pour chaque ligne, retourne un objet JSON avec :
-- ref : référence produit (string, vide si absente)
-- name : désignation du produit (string)
-- qty : quantité commandée (number)
-- prix : prix unitaire HT (number)
-- total : total ligne HT (number)
-
-Réponds UNIQUEMENT avec un tableau JSON valide, sans texte avant ou après, sans balises markdown.
-Exemple : [{"ref":"FAR001","name":"Farine T45 25kg","qty":10,"prix":13.00,"total":130.00}]`
-              }
-            ]
-          }]
+          action: "analyserFacture",
+          fournisseur,
+          filename: file.name,
+          pdfBase64: base64
         })
       });
 
       clearInterval(interval);
       const data = await response.json();
-      const text = data.content?.[0]?.text || "[]";
-      const parsed = JSON.parse(text.trim().replace(/```json|```/g, ""));
+      if (!data.success) throw new Error(data.error || "Erreur backend inconnue");
+      const parsed = data.lignes;
 
       // Comparer avec mercuriale
       const result = parsed.map(l => {
