@@ -1746,16 +1746,25 @@ function ModifierCommande({ cmd, onClose, onSave }) {
           />
           {suggestions.length > 0 && (
             <div style={{ position:"absolute", top:"100%", left:0, right:0, background:"#fff", border:"2px solid #D4A96A", borderRadius:8, boxShadow:"0 4px 20px rgba(0,0,0,.15)", zIndex:10, maxHeight:200, overflowY:"auto" }}>
-              {suggestions.map(p => (
-                <div key={p.ref || p.name} onClick={() => addProduct(p)}
-                  style={{ padding:"8px 14px", cursor:"pointer", borderBottom:"1px solid #f0e8d8", display:"flex", justifyContent:"space-between", alignItems:"center" }}
-                  onMouseEnter={e => e.currentTarget.style.background="#fffaf5"}
-                  onMouseLeave={e => e.currentTarget.style.background="#fff"}
-                >
-                  <span style={{ fontSize:12, color:"#2C1810", fontWeight:600 }}>{p.name}</span>
-                  <span style={{ fontSize:11, color:"#9B7B5A" }}>{fmt(p.prix_ht)} HT · {p.four}</span>
-                </div>
-              ))}
+              {suggestions.map(p => {
+                const meilleur = meilleurFournisseurPour(p);
+                const alternative = meilleur && meilleur.fournisseur !== p.four && meilleur.prix < p.prix_ht - 0.005 ? meilleur : null;
+                return (
+                  <div key={p.ref || p.name} onClick={() => addProduct(p)}
+                    style={{ padding:"8px 14px", cursor:"pointer", borderBottom:"1px solid #f0e8d8", display:"flex", justifyContent:"space-between", alignItems:"center" }}
+                    onMouseEnter={e => e.currentTarget.style.background="#fffaf5"}
+                    onMouseLeave={e => e.currentTarget.style.background="#fff"}
+                  >
+                    <span style={{ fontSize:12, color:"#2C1810", fontWeight:600 }}>{p.name}</span>
+                    <span style={{ textAlign:"right" }}>
+                      <span style={{ fontSize:11, color:"#9B7B5A", display:"block" }}>{fmt(p.prix_ht)} HT · {p.four}</span>
+                      {alternative && (
+                        <span style={{ fontSize:10, color:"#1B7A3D", fontWeight:600 }}>💡 {fmt(alternative.prix)} chez {alternative.fournisseur}</span>
+                      )}
+                    </span>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
@@ -1774,11 +1783,20 @@ function ModifierCommande({ cmd, onClose, onSave }) {
               <tbody>
                 {items.map((item, i) => {
                   const key = item.ref || item.name;
+                  const meilleur = meilleurFournisseurPour(item);
+                  const alternative = meilleur && meilleur.fournisseur !== item.four && meilleur.prix < item.prix_ht - 0.005 ? meilleur : null;
                   return (
                     <tr key={key} style={{ background: i%2===0 ? "#fffaf5" : "#fff" }}>
                       <td style={{ padding:"7px 10px", fontSize:10, color:"#8B4513", fontFamily:"monospace", borderRadius:"6px 0 0 6px" }}>{item.ref || "—"}</td>
                       <td style={{ padding:"7px 10px", fontSize:11, color:"#2C1810", fontWeight:600 }}>{item.name}</td>
-                      <td style={{ padding:"7px 10px", fontSize:10, color:"#7A5C3A" }}>{item.four || "—"}</td>
+                      <td style={{ padding:"7px 10px", fontSize:10, color:"#7A5C3A" }}>
+                        {item.four || "—"}
+                        {alternative && (
+                          <div title="Moins cher chez un autre fournisseur, d'après votre mercuriale" style={{ fontSize:9, color:"#1B7A3D", fontWeight:700, marginTop:2 }}>
+                            💡 {fmt(alternative.prix)} chez {alternative.fournisseur}
+                          </div>
+                        )}
+                      </td>
                       <td style={{ padding:"7px 10px" }}>
                         <div style={{ display:"flex", alignItems:"center", gap:4 }}>
                           <button onClick={() => changeQty(key, -1)} style={{ width:22, height:22, borderRadius:5, border:"1px solid #D4A96A", background:"#fff8f0", cursor:"pointer", fontSize:13 }}>−</button>
@@ -3375,6 +3393,21 @@ const suggestProduits = (produits, ligneName, ligneRef, recherche, fournisseur, 
     .map(x => x.p);
 };
 
+// Parmi tous les fournisseurs connus pour ce produit (fournisseur principal +
+// prix_fournisseurs), renvoie celui au prix le plus bas.
+const meilleurFournisseurPour = (p) => {
+  if (!p) return null;
+  const options = [];
+  if (typeof p.prix_ht === "number" && p.four) options.push({ fournisseur: p.four, prix: p.prix_ht });
+  if (p.prix_fournisseurs) {
+    Object.entries(p.prix_fournisseurs).forEach(([f, prix]) => {
+      if (typeof prix === "number") options.push({ fournisseur: f, prix });
+    });
+  }
+  if (options.length === 0) return null;
+  return options.reduce((min, o) => o.prix < min.prix ? o : min, options[0]);
+};
+
 function TabVerifFactures({ produits, setProduits }) {
   const [step, setStep] = useState("upload"); // upload | loading | result
   const [fournisseur, setFournisseur] = useState("");
@@ -3638,6 +3671,8 @@ function TabVerifFactures({ produits, setProduits }) {
                 {lignesFiltrees.map((l, i) => {
                   const badge = badgeStatut(l.statut);
                   const rowBg = l.statut==="surcharge" ? "#FCEBEB" : l.statut==="remise" ? "#FFF8E1" : i%2===0?"#fffaf5":"#fff";
+                  const meilleur = l.merc ? meilleurFournisseurPour(l.merc) : null;
+                  const alternativeMoinsChere = meilleur && meilleur.fournisseur !== fournisseur && l.prixMerc !== null && meilleur.prix < l.prixMerc - 0.005 ? meilleur : null;
                   return (
                     <tr key={l.origIndex} style={{ background:rowBg, borderTop:"1px solid #EDD5B3" }}>
                       <td style={{ padding:"7px 12px", fontFamily:"monospace", fontSize:11, color:"#8B4513" }}>{l.ref || "—"}</td>
@@ -3655,6 +3690,11 @@ function TabVerifFactures({ produits, setProduits }) {
                             {l.merc ? l.merc.name : "🔍 Associer un produit"}
                           </div>
                         </div>
+                        {alternativeMoinsChere && (
+                          <div title="Ce produit est moins cher chez un autre fournisseur, d'après votre mercuriale" style={{ fontSize:10, color:"#1B7A3D", fontWeight:600, marginTop:2, maxWidth:160, marginLeft:"auto" }}>
+                            💡 {fmt(alternativeMoinsChere.prix)} chez {alternativeMoinsChere.fournisseur}
+                          </div>
+                        )}
                       </td>
                       <td style={{ padding:"7px 12px", textAlign:"right", fontWeight:700, color:l.ecartUnit>0.005?"#791F1F":l.ecartUnit<-0.005?"#27500A":"#9B7B5A" }}>
                         {l.ecartUnit !== null ? (l.ecartUnit>=0?"+":"") + l.ecartUnit.toFixed(3).replace(".",",")+" €" : "—"}
