@@ -3375,7 +3375,7 @@ const suggestProduits = (produits, ligneName, ligneRef, recherche, fournisseur, 
     .map(x => x.p);
 };
 
-function TabVerifFactures({ produits }) {
+function TabVerifFactures({ produits, setProduits }) {
   const [step, setStep] = useState("upload"); // upload | loading | result
   const [fournisseur, setFournisseur] = useState("");
   const [loadingMsg, setLoadingMsg] = useState("");
@@ -3476,6 +3476,33 @@ function TabVerifFactures({ produits }) {
     setLignes(prev => prev.map((l, i) => i === idx ? recalcLigneFacture(l, produit) : l));
     setMatchIndex(null);
     setMatchSearch("");
+  };
+
+  // Reporte le prix de la ligne facture sur la mercuriale, pour CE fournisseur
+  // précis (met à jour prix_ht si c'est son fournisseur principal, sinon
+  // l'entrée correspondante dans prix_fournisseurs). Mise à jour optimiste en
+  // local, puis sauvegarde en arrière-plan dans Google Sheets.
+  const mettreAJourPrixMercuriale = (idx) => {
+    const l = lignes[idx];
+    if (!l.merc) return;
+    if (!window.confirm(`Mettre à jour le prix de "${l.merc.name}" chez ${fournisseur} : ${fmt(l.prix)} (au lieu de ${l.prixMerc !== null ? fmt(l.prixMerc) : "—"}) ?`)) return;
+
+    const estFournisseurPrincipal = l.merc.four === fournisseur;
+    const produitMaj = {
+      ...l.merc,
+      prix_ht: estFournisseurPrincipal ? l.prix : l.merc.prix_ht,
+      prix_fournisseurs: estFournisseurPrincipal
+        ? (l.merc.prix_fournisseurs || {})
+        : { ...(l.merc.prix_fournisseurs || {}), [fournisseur]: l.prix }
+    };
+
+    setProduits(prev => prev.map(p => (p.ref === l.merc.ref && p.name === l.merc.name) ? produitMaj : p));
+    setLignes(prev => prev.map((li, i) => i === idx ? recalcLigneFacture(li, produitMaj) : li));
+
+    postToSheets(SHEETS_URL, {
+      action: "updatePrixFournisseur",
+      ref: l.merc.ref, name: l.merc.name, fournisseur, nouveauPrix: l.prix
+    });
   };
 
   const lignesFiltrees = lignes
@@ -3602,8 +3629,8 @@ function TabVerifFactures({ produits }) {
             <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
               <thead>
                 <tr style={{ background:"#2C1810" }}>
-                  {["Réf.","Désignation","Qté","Prix facturé","Prix mercuriale","Écart unit.","Écart total","Statut"].map(h => (
-                    <th key={h} style={{ padding:"8px 12px", textAlign:["Qté","Prix facturé","Prix mercuriale","Écart unit.","Écart total"].includes(h)?"right":"left", color:"#D4A96A", fontSize:11, fontWeight:700 }}>{h}</th>
+                  {["Réf.","Désignation","Qté","Prix facturé","Prix mercuriale","Écart unit.","Écart total","Statut","Action"].map(h => (
+                    <th key={h} style={{ padding:"8px 12px", textAlign:["Qté","Prix facturé","Prix mercuriale","Écart unit.","Écart total","Action"].includes(h)?"right":"left", color:"#D4A96A", fontSize:11, fontWeight:700 }}>{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -3640,11 +3667,22 @@ function TabVerifFactures({ produits }) {
                           {badge.label}
                         </span>
                       </td>
+                      <td style={{ padding:"7px 12px", textAlign:"right" }}>
+                        {(l.statut === "surcharge" || l.statut === "remise") && l.merc && (
+                          <button
+                            onClick={() => mettreAJourPrixMercuriale(l.origIndex)}
+                            title="Reporter le prix facturé sur la mercuriale, pour ce fournisseur"
+                            style={{ padding:"4px 8px", borderRadius:6, border:"1px solid #8B4513", background:"#fff", color:"#8B4513", fontSize:10, fontWeight:700, cursor:"pointer", whiteSpace:"nowrap" }}
+                          >
+                            ✓ Mettre à jour
+                          </button>
+                        )}
+                      </td>
                     </tr>
                   );
                 })}
                 {lignesFiltrees.length === 0 && (
-                  <tr><td colSpan="8" style={{ textAlign:"center", padding:"2rem", color:"#9B7B5A" }}>Aucun article dans cette catégorie.</td></tr>
+                  <tr><td colSpan="9" style={{ textAlign:"center", padding:"2rem", color:"#9B7B5A" }}>Aucun article dans cette catégorie.</td></tr>
                 )}
               </tbody>
             </table>
@@ -4426,7 +4464,7 @@ export default function App() {
           {tab==="emballages"  && <TabEmballages emballages={emballages} boulangerieId={boulangerieId} isAdmin={isAdmin} onAjouter={ajouterEmballage} onModifierStock={modifierStockEmb} onCommander={passerCommandeEmb} />}
           {tab==="patisserie"  && <TabPatisserie boulangerieId={boulangerieId} compte={compte} isAdmin={isAdmin} />}
           {tab==="coutmatiere" && <TabCoutMatiere boulangerieId={boulangerieId} isAdmin={isAdmin} produits={produits} />}
-          {tab==="factures"    && <TabVerifFactures produits={produits} />}
+          {tab==="factures"    && <TabVerifFactures produits={produits} setProduits={setProduits} />}
           {tab==="historique"  && <TabHistorique history={historyVisible} onUpdateStatus={updateStatus} onUpdateCommande={updateCommande} isAdmin={isAdmin} />}
         </div>
       </div>
