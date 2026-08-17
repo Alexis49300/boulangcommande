@@ -56,6 +56,43 @@ const BOULANGERIES = [
   { id: 5, name: "La Pause Cholet",                  color: "#9B6B47" },
 ];
 
+
+// Fenêtre par défaut pour une boulangerie
+const FENETRE_DEFAULT = {
+  ouverture: { jour: 3, heure: 0, minute: 0 },   // mercredi 0h00
+  fermeture: { jour: 1, heure: 7, minute: 30 },   // lundi 7h30
+};
+
+// Fenêtres par boulangerie : { [boulangerieId]: { ouverture, fermeture } | null }
+// null = pas de restriction pour cette boulangerie
+const FENETRES_DEFAULT = {
+  1: { ouverture: { jour: 3, heure: 0, minute: 0 }, fermeture: { jour: 1, heure: 7, minute: 30 } },
+  2: { ouverture: { jour: 3, heure: 0, minute: 0 }, fermeture: { jour: 1, heure: 7, minute: 30 } },
+  3: null,
+  4: null,
+  5: { ouverture: { jour: 3, heure: 0, minute: 0 }, fermeture: { jour: 1, heure: 7, minute: 30 } },
+};
+
+const JOURS = ["Dimanche","Lundi","Mardi","Mercredi","Jeudi","Vendredi","Samedi"];
+
+// Retourne true si la boulangerie peut commander maintenant
+function commandeOuverte(fenetre) {
+  if (!fenetre) return true; // pas de restriction
+  const now = new Date();
+  const toAbs = (j, h, m) => j * 24 * 60 + h * 60 + m;
+  const absNow = toAbs(now.getDay(), now.getHours(), now.getMinutes());
+  const absOuv = toAbs(fenetre.ouverture.jour, fenetre.ouverture.heure, fenetre.ouverture.minute);
+  const absFer = toAbs(fenetre.fermeture.jour, fenetre.fermeture.heure, fenetre.fermeture.minute);
+  if (absOuv <= absFer) return absNow >= absOuv && absNow <= absFer;
+  return absNow >= absOuv || absNow <= absFer;
+}
+
+// Récupère la fenêtre d'une boulangerie depuis le state fenetres
+function getFenetrePour(fenetres, boulangerieId) {
+  if (fenetres && fenetres[boulangerieId] !== undefined) return fenetres[boulangerieId];
+  return FENETRES_DEFAULT[boulangerieId] ?? null;
+}
+
 const ALL_PRODUCTS = [
   { ref: 'FRU15', name: 'Abricot 1/2 pelé sirop 5/1', unit: '1', prix_ht: 9.88, tva: 0.055, cat: 'Fruits & Garnitures', four: 'Fuseau' },
   { ref: 'FRU16', name: 'Abricot Cube 5/5mms 4kg', unit: '1', prix_ht: 8.34, tva: 0.055, cat: 'Fruits & Garnitures', four: 'Fuseau' },
@@ -600,13 +637,15 @@ function PriceTag({ prix_ht, tva }) {
   );
 }
 
-function CartPanel({ cart, setCart, boulangerieId, addToHistory }) {
+function CartPanel({ cart, setCart, boulangerieId, addToHistory, isAdmin, fenetre }) {
   const total_ht = cart.reduce((s, i) => s + i.prix_ht * i.qty, 0);
   const total_ttc = cart.reduce((s, i) => s + i.prix_ht * (1 + i.tva) * i.qty, 0);
   const boulangerieNom = BOULANGERIES.find(b => b.id === boulangerieId)?.name || "";
+  const ouvert = commandeOuverte(fenetre);
+  const peutValider = boulangerieId && cart.length > 0 && (isAdmin || fenetre === null || ouvert);
 
   const handleValidate = () => {
-    if (!boulangerieId || cart.length === 0) return;
+    if (!peutValider) return;
     const cmd = {
       id: `CMD-${new Date().getFullYear()}-${String(Math.floor(Math.random()*9000)+1000)}`,
       date: today(), boulangerie: boulangerieNom,
@@ -645,6 +684,9 @@ function CartPanel({ cart, setCart, boulangerieId, addToHistory }) {
                 <div style={{ flex:1 }}>
                   <div style={{ fontSize:11, fontWeight:600, color:"#2C1810", lineHeight:1.3 }}>{item.name}</div>
                   <div style={{ fontSize:10, color:"#9B7B5A" }}>{fmt(item.prix_ht)} HT × {item.qty} = {fmt(item.prix_ht * item.qty)}</div>
+                  {item.cond_label && (
+                    <div style={{ fontSize:9, color:"#8B4513", fontWeight:700, marginTop:1 }}>📦 {item.cond_label}</div>
+                  )}
                 </div>
                 <button onClick={()=>setCart(c=>c.filter(x=>(x.ref||x.name)!==(item.ref||item.name)))}
                   style={{ border:"none", background:"#fde8e8", color:"#c0392b", borderRadius:4, width:18, height:18, cursor:"pointer", fontSize:10, flexShrink:0 }}>✕</button>
@@ -670,17 +712,25 @@ function CartPanel({ cart, setCart, boulangerieId, addToHistory }) {
               <span>Total TTC</span><span>{fmt(total_ttc)}</span>
             </div>
           </div>
-          <button onClick={handleValidate} disabled={!boulangerieId}
+          <button onClick={handleValidate} disabled={!peutValider}
             style={{
               width:"100%", marginTop:10, padding:"10px 0",
-              background: boulangerieId ? "linear-gradient(135deg, #8B4513, #6B3210)" : "#ccc",
+              background: peutValider ? "linear-gradient(135deg, #8B4513, #6B3210)" : "#ccc",
               color:"#fff", border:"none", borderRadius:9,
-              cursor: boulangerieId ? "pointer" : "not-allowed",
+              cursor: peutValider ? "pointer" : "not-allowed",
               fontWeight:700, fontSize:12, fontFamily:"Georgia, serif",
-              boxShadow: boulangerieId ? "0 3px 12px rgba(139,69,19,.35)" : "none"
+              boxShadow: peutValider ? "0 3px 12px rgba(139,69,19,.35)" : "none"
             }}>
-            {boulangerieId ? "✓ Valider la commande" : "Choisir une boulangerie"}
+            {!boulangerieId ? "Choisir une boulangerie"
+              : (!isAdmin && fenetre !== null && !ouvert) ? "🔒 Commandes fermées"
+              : "✓ Valider la commande"}
           </button>
+          {!isAdmin && fenetre !== null && !ouvert && (
+            <div style={{ marginTop:8, fontSize:10, color:"#C0392B", textAlign:"center", lineHeight:1.4 }}>
+              Les commandes sont fermées.<br/>
+              Fenêtre : {JOURS[fenetre.ouverture.jour]} {String(fenetre.ouverture.heure).padStart(2,"0")}h{String(fenetre.ouverture.minute).padStart(2,"0")} → {JOURS[fenetre.fermeture.jour]} {String(fenetre.fermeture.heure).padStart(2,"0")}h{String(fenetre.fermeture.minute).padStart(2,"0")}
+            </div>
+          )}
         </>
       )}
     </div>
@@ -690,16 +740,13 @@ function CartPanel({ cart, setCart, boulangerieId, addToHistory }) {
 // ─── MODAL PRODUIT LIBRE ──────────────────────────────────────────────────────
 function ModalProduitLibre({ onClose, onAdd }) {
   const [nom, setNom] = useState("");
-  const [prix, setPrix] = useState("");
   const [qty, setQty] = useState(1);
   const [unite, setUnite] = useState("");
   const [erreur, setErreur] = useState("");
 
   const handleAdd = () => {
     if (!nom.trim()) { setErreur("Le nom est obligatoire."); return; }
-    const p = parseFloat(prix.replace(",", "."));
-    if (isNaN(p) || p <= 0) { setErreur("Indiquez un prix valide (ex: 12.50)."); return; }
-    onAdd({ ref: "", name: nom.trim(), unit: unite.trim() || "—", prix_ht: p, tva: 0.055, cat: "Hors mercuriale", qty });
+    onAdd({ ref: "", name: nom.trim(), unit: unite.trim() || "—", prix_ht: 0, tva: 0.055, cat: "Hors mercuriale", qty });
     onClose();
   };
 
@@ -719,7 +766,6 @@ function ModalProduitLibre({ onClose, onAdd }) {
         background: "#fff", borderRadius: 16, padding: 28, width: 420, maxWidth: "90vw",
         boxShadow: "0 8px 40px rgba(0,0,0,.25)", border: "2px solid #D4A96A"
       }}>
-        {/* Header */}
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:20 }}>
           <div>
             <h3 style={{ margin:0, fontFamily:"Georgia", color:"#2C1810", fontSize:16 }}>✏️ Produit hors mercuriale</h3>
@@ -728,7 +774,6 @@ function ModalProduitLibre({ onClose, onAdd }) {
           <button onClick={onClose} style={{ background:"none", border:"none", fontSize:20, cursor:"pointer", color:"#9B7B5A", lineHeight:1 }}>✕</button>
         </div>
 
-        {/* Champs */}
         <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
           <div>
             <label style={labelStyle}>Désignation du produit *</label>
@@ -736,19 +781,11 @@ function ModalProduitLibre({ onClose, onAdd }) {
               placeholder="Ex: Beurre extra-fin 500g"
               style={inputStyle} autoFocus />
           </div>
-          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
-            <div>
-              <label style={labelStyle}>Prix HT (€) *</label>
-              <input value={prix} onChange={e => { setPrix(e.target.value); setErreur(""); }}
-                placeholder="Ex: 12.50"
-                style={inputStyle} />
-            </div>
-            <div>
-              <label style={labelStyle}>Conditionnement</label>
-              <input value={unite} onChange={e => setUnite(e.target.value)}
-                placeholder="Ex: Sac 5kg"
-                style={inputStyle} />
-            </div>
+          <div>
+            <label style={labelStyle}>Conditionnement</label>
+            <input value={unite} onChange={e => setUnite(e.target.value)}
+              placeholder="Ex: Sac 5kg"
+              style={inputStyle} />
           </div>
           <div>
             <label style={labelStyle}>Quantité</label>
@@ -761,21 +798,9 @@ function ModalProduitLibre({ onClose, onAdd }) {
               <span style={{ fontSize:11, color:"#9B7B5A", marginLeft:4 }}>unité(s)</span>
             </div>
           </div>
-
-          {/* Aperçu prix */}
-          {prix && !isNaN(parseFloat(prix.replace(",","."))) && parseFloat(prix.replace(",",".")) > 0 && (
-            <div style={{ background:"#fffaf5", border:"1px solid #EDD5B3", borderRadius:8, padding:"10px 14px", display:"flex", justifyContent:"space-between" }}>
-              <span style={{ fontSize:11, color:"#7A5C3A" }}>Total TTC estimé ×{qty}</span>
-              <span style={{ fontWeight:700, color:"#2C1810", fontSize:13 }}>
-                {fmt(parseFloat(prix.replace(",",".")) * 1.055 * qty)}
-              </span>
-            </div>
-          )}
-
           {erreur && <p style={{ margin:0, color:"#c0392b", fontSize:12, fontWeight:600 }}>⚠ {erreur}</p>}
         </div>
 
-        {/* Boutons */}
         <div style={{ display:"flex", gap:10, marginTop:20 }}>
           <button onClick={onClose}
             style={{ flex:1, padding:"10px 0", border:"2px solid #D4A96A", borderRadius:9, background:"#fff", color:"#8B4513", cursor:"pointer", fontWeight:700, fontSize:12, fontFamily:"Georgia" }}>
@@ -792,14 +817,16 @@ function ModalProduitLibre({ onClose, onAdd }) {
 }
 
 // ─── TAB COMMANDE ─────────────────────────────────────────────────────────────
-function MobileCartBar({ cart, boulangerieId, setCart, addToHistory }) {
+function MobileCartBar({ cart, boulangerieId, setCart, addToHistory, isAdmin, fenetre }) {
   const [open, setOpen] = useState(false);
   const total_ttc = cart.reduce((s, i) => s + i.prix_ht * (1 + i.tva) * i.qty, 0);
   const nbArticles = cart.reduce((s, i) => s + i.qty, 0);
   const boulangerieNom = BOULANGERIES.find(b => b.id === boulangerieId)?.name || "";
+  const ouvert = commandeOuverte(fenetre);
+  const peutValider = boulangerieId && cart.length > 0 && (isAdmin || fenetre === null || ouvert);
 
   const handleValidate = () => {
-    if (!boulangerieId || cart.length === 0) return;
+    if (!peutValider) return;
     const cmd = {
       id: `CMD-${new Date().getFullYear()}-${String(Math.floor(Math.random()*9000)+1000)}`,
       date: today(), boulangerie: boulangerieNom,
@@ -832,6 +859,9 @@ function MobileCartBar({ cart, boulangerieId, setCart, addToHistory }) {
               <div style={{ flex:1, minWidth:0 }}>
                 <div style={{ fontSize:12, fontWeight:600, color:"#2C1810" }}>{item.name}</div>
                 <div style={{ fontSize:10, color:"#9B7B5A" }}>{fmt(item.prix_ht)} HT × {item.qty} = {fmt(item.prix_ht * item.qty)}</div>
+                {item.cond_label && (
+                  <div style={{ fontSize:9, color:"#8B4513", fontWeight:700 }}>📦 {item.cond_label}</div>
+                )}
               </div>
               <div style={{ display:"flex", alignItems:"center", gap:4 }}>
                 <button onClick={() => setCart(c => c.map(x => (x.ref||x.name)===(item.ref||item.name) ? {...x, qty:Math.max(1,x.qty-1)} : x))}
@@ -844,14 +874,21 @@ function MobileCartBar({ cart, boulangerieId, setCart, addToHistory }) {
               </div>
             </div>
           ))}
-          <button onClick={handleValidate} disabled={!boulangerieId || cart.length === 0}
+          <button onClick={handleValidate} disabled={!peutValider}
             style={{
               width:"100%", padding:"12px", marginTop:8, borderRadius:9, border:"none",
-              background: boulangerieId && cart.length > 0 ? "linear-gradient(135deg,#8B4513,#6B3210)" : "#ccc",
-              color:"#fff", fontWeight:700, fontSize:14, fontFamily:"Georgia", cursor: boulangerieId && cart.length > 0 ? "pointer" : "default"
+              background: peutValider ? "linear-gradient(135deg,#8B4513,#6B3210)" : "#ccc",
+              color:"#fff", fontWeight:700, fontSize:14, fontFamily:"Georgia", cursor: peutValider ? "pointer" : "default"
             }}>
-            {boulangerieId ? `✅ Valider — ${fmt(total_ttc)}` : "Choisir une boulangerie"}
+            {!boulangerieId ? "Choisir une boulangerie"
+              : (!isAdmin && fenetre !== null && !ouvert) ? "🔒 Commandes fermées"
+              : `✅ Valider — ${fmt(total_ttc)}`}
           </button>
+          {!isAdmin && fenetre !== null && !ouvert && (
+            <div style={{ marginTop:6, fontSize:10, color:"#C0392B", textAlign:"center", lineHeight:1.4 }}>
+              Fenêtre : {JOURS[fenetre.ouverture.jour]} {String(fenetre.ouverture.heure).padStart(2,"0")}h{String(fenetre.ouverture.minute).padStart(2,"0")} → {JOURS[fenetre.fermeture.jour]} {String(fenetre.fermeture.heure).padStart(2,"0")}h{String(fenetre.fermeture.minute).padStart(2,"0")}
+            </div>
+          )}
         </div>
       )}
 
@@ -875,13 +912,106 @@ function MobileCartBar({ cart, boulangerieId, setCart, addToHistory }) {
   );
 }
 
-function TabCommande({ cart, setCart, boulangerieId, addToHistory, produits, setProduits, favoris, toggleFavori, history }) {
+function ModalTriFavoris({ favoris, produits, onSave, onClose }) {
+  const [ordre, setOrdre] = useState([...favoris]);
+  const [dragging, setDragging] = useState(null);
+  const [dragOver, setDragOver] = useState(null);
+
+  const getProductName = (key) => {
+    const p = produits.find(p => ((p.ref && p.name) ? `${p.ref}__${p.name}` : (p.ref || p.name)) === key);
+    return p ? p.name : key;
+  };
+
+  const handleDragStart = (e, idx) => {
+    setDragging(idx);
+    e.dataTransfer.effectAllowed = "move";
+  };
+
+  const handleDragOver = (e, idx) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    if (idx !== dragging) setDragOver(idx);
+  };
+
+  const handleDrop = (e, idx) => {
+    e.preventDefault();
+    if (dragging === null || dragging === idx) return;
+    const newOrdre = [...ordre];
+    const [moved] = newOrdre.splice(dragging, 1);
+    newOrdre.splice(idx, 0, moved);
+    setOrdre(newOrdre);
+    setDragging(null);
+    setDragOver(null);
+  };
+
+  const moveUp   = (idx) => { if (idx === 0) return; const a = [...ordre]; [a[idx-1], a[idx]] = [a[idx], a[idx-1]]; setOrdre(a); };
+  const moveDown = (idx) => { if (idx === ordre.length-1) return; const a = [...ordre]; [a[idx], a[idx+1]] = [a[idx+1], a[idx]]; setOrdre(a); };
+
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.55)", zIndex:1300, display:"flex", alignItems:"center", justifyContent:"center" }}>
+      <div style={{ background:"#fff", borderRadius:14, padding:28, width:460, maxWidth:"95vw", maxHeight:"88vh", display:"flex", flexDirection:"column", boxShadow:"0 8px 40px rgba(0,0,0,.3)", border:"2px solid #D4A96A" }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
+          <h3 style={{ margin:0, fontFamily:"Georgia", color:"#2C1810", fontSize:15 }}>⭐ Trier mes favoris</h3>
+          <button onClick={onClose} style={{ background:"none", border:"none", fontSize:20, cursor:"pointer", color:"#9B7B5A" }}>✕</button>
+        </div>
+        <div style={{ fontSize:11, color:"#9B7B5A", marginBottom:14 }}>
+          Glissez-déposez ou utilisez les flèches ↑↓ pour changer l'ordre d'affichage.
+        </div>
+        <div style={{ flex:1, overflowY:"auto", display:"flex", flexDirection:"column", gap:6, marginBottom:16 }}>
+          {ordre.map((key, idx) => (
+            <div key={key}
+              draggable
+              onDragStart={e => handleDragStart(e, idx)}
+              onDragOver={e => handleDragOver(e, idx)}
+              onDrop={e => handleDrop(e, idx)}
+              onDragEnd={() => { setDragging(null); setDragOver(null); }}
+              style={{
+                display:"flex", alignItems:"center", gap:10,
+                padding:"9px 12px", borderRadius:9,
+                border: dragOver === idx ? "2px solid #8B4513" : "1.5px solid #EDD5B3",
+                background: dragging === idx ? "#fffaf5" : dragOver === idx ? "#FFF3E0" : "#fff",
+                cursor:"grab", transition:"all .1s",
+                opacity: dragging === idx ? 0.5 : 1,
+                boxShadow: dragging === idx ? "0 4px 16px rgba(139,69,19,.2)" : "none",
+              }}>
+              <span style={{ color:"#D4A96A", fontSize:16, cursor:"grab", flexShrink:0 }}>⠿</span>
+              <span style={{ fontSize:11, fontWeight:600, color:"#8B4513", flexShrink:0, minWidth:20, textAlign:"right" }}>{idx+1}.</span>
+              <span style={{ flex:1, fontSize:12, color:"#2C1810", fontWeight:600, lineHeight:1.3 }}>{getProductName(key)}</span>
+              <div style={{ display:"flex", flexDirection:"column", gap:2, flexShrink:0 }}>
+                <button onClick={() => moveUp(idx)} disabled={idx === 0}
+                  style={{ background:"none", border:"1px solid #EDD5B3", borderRadius:4, width:22, height:18, cursor: idx===0 ? "default":"pointer", color: idx===0 ? "#ccc":"#8B4513", fontSize:10, lineHeight:1, padding:0 }}>▲</button>
+                <button onClick={() => moveDown(idx)} disabled={idx === ordre.length-1}
+                  style={{ background:"none", border:"1px solid #EDD5B3", borderRadius:4, width:22, height:18, cursor: idx===ordre.length-1 ? "default":"pointer", color: idx===ordre.length-1 ? "#ccc":"#8B4513", fontSize:10, lineHeight:1, padding:0 }}>▼</button>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div style={{ display:"flex", gap:10, justifyContent:"flex-end" }}>
+          <button onClick={onClose} style={{ padding:"9px 18px", borderRadius:9, border:"1.5px solid #D4A96A", background:"#fff", color:"#9B7B5A", cursor:"pointer", fontSize:12, fontWeight:600 }}>Annuler</button>
+          <button onClick={() => { onSave(ordre); onClose(); }}
+            style={{ padding:"9px 20px", borderRadius:9, border:"none", background:"linear-gradient(135deg,#8B4513,#6B3210)", color:"#fff", cursor:"pointer", fontSize:12, fontWeight:700, fontFamily:"Georgia, serif", boxShadow:"0 3px 12px rgba(139,69,19,.35)" }}>
+            ✓ Enregistrer l'ordre
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TabCommande({ cart, setCart, boulangerieId, addToHistory, produits, setProduits, favoris, toggleFavori, reordonnerFavoris, history, isAdmin, fenetres, onSaveFenetre }) {
   const [search, setSearch] = useState("");
   const [filterCat, setFilterCat] = useState("Tous");
   const [showModal, setShowModal] = useState(false);
   const [importMsg, setImportMsg] = useState(null);
   const [qtys, setQtys] = useState({});
   const [showPrixFour, setShowPrixFour] = useState(null);
+  const [showTriFavoris, setShowTriFavoris] = useState(false);
+  const [condModes, setCondModes] = useState({});
+  const [showFenetreConfig, setShowFenetreConfig] = useState(false);
+  const [fenetresEdit, setFenetresEdit] = useState(null); // édition en cours
+
+  const fenetre = getFenetrePour(fenetres, boulangerieId);
+  const ouvert = commandeOuverte(fenetre);
 
   // Moyenne des quantités commandées sur les 4 dernières semaines
   const moyennes = useMemo(() => {
@@ -919,7 +1049,7 @@ function TabCommande({ cart, setCart, boulangerieId, addToHistory, produits, set
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
-    return produits.filter(p => {
+    const liste = produits.filter(p => {
       const mSearch = !q || p.name.toLowerCase().includes(q) || p.ref.toLowerCase().includes(q);
       const pKey = (p.ref && p.name) ? `${p.ref}__${p.name}` : (p.ref || p.name);
       const mCat = filterCat === "Tous" ? true
@@ -927,6 +1057,14 @@ function TabCommande({ cart, setCart, boulangerieId, addToHistory, produits, set
                  : p.cat === filterCat;
       return mSearch && mCat;
     });
+    if (filterCat === "⭐ Favoris") {
+      liste.sort((a, b) => {
+        const keyA = (a.ref && a.name) ? `${a.ref}__${a.name}` : (a.ref || a.name);
+        const keyB = (b.ref && b.name) ? `${b.ref}__${b.name}` : (b.ref || b.name);
+        return favoris.indexOf(keyA) - favoris.indexOf(keyB);
+      });
+    }
+    return liste;
   }, [search, filterCat, produits, favoris]);
 
   const handleImportMercuriale = async (e) => {
@@ -959,6 +1097,7 @@ function TabCommande({ cart, setCart, boulangerieId, addToHistory, produits, set
         const unit = row[2] != null ? String(row[2]) : "1";
         const four = row[8] ? String(row[8]).trim() : "";
         const prix = parseFloat(row[9]);
+        const cond_carton = row[10] ? parseInt(row[10]) : null; // colonne K : nb unités par carton
         if (!name || isNaN(prix) || prix <= 0) continue;
         const ancien = ALL_PRODUCTS.find(p => p.ref === ref || p.name === name);
         const cat = ancien?.cat || "Divers";
@@ -968,7 +1107,7 @@ function TabCommande({ cart, setCart, boulangerieId, addToHistory, produits, set
           const p = parseFloat(row[col]);
           if (!isNaN(p) && p > 0) prix_fournisseurs[fourHeaders[idx]] = p;
         });
-        nouveaux.push({ ref, name, unit, prix_ht: prix, tva: 0.055, cat, four, prix_fournisseurs });
+        nouveaux.push({ ref, name, unit, prix_ht: prix, tva: 0.055, cat, four, prix_fournisseurs, ...(cond_carton && cond_carton > 1 ? { cond_carton } : {}) });
       }
       if (nouveaux.length === 0) {
         setImportMsg({ type: "error", text: "❌ Aucun produit trouvé dans le fichier." });
@@ -1006,6 +1145,113 @@ function TabCommande({ cart, setCart, boulangerieId, addToHistory, produits, set
   return (
     <>
     {showModal && <ModalProduitLibre onClose={() => setShowModal(false)} onAdd={addCustomToCart} />}
+    {showTriFavoris && (
+      <ModalTriFavoris
+        favoris={favoris}
+        produits={produits}
+        onSave={reordonnerFavoris}
+        onClose={() => setShowTriFavoris(false)}
+      />
+    )}
+
+    {/* Modale config fenêtres de commande (admin) */}
+    {showFenetreConfig && (
+      <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.5)", zIndex:1200, display:"flex", alignItems:"center", justifyContent:"center" }}>
+        <div style={{ background:"#fff", borderRadius:14, padding:28, width:560, maxWidth:"95vw", maxHeight:"90vh", display:"flex", flexDirection:"column", boxShadow:"0 8px 40px rgba(0,0,0,.25)", border:"2px solid #D4A96A" }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:18 }}>
+            <h3 style={{ margin:0, fontFamily:"Georgia", color:"#2C1810", fontSize:15 }}>🕐 Fenêtres de commande</h3>
+            <button onClick={() => setShowFenetreConfig(false)} style={{ background:"none", border:"none", fontSize:20, cursor:"pointer", color:"#9B7B5A" }}>✕</button>
+          </div>
+          <div style={{ flex:1, overflowY:"auto", display:"flex", flexDirection:"column", gap:14 }}>
+            {BOULANGERIES.map(b => {
+              const f = fenetresEdit ? (fenetresEdit[b.id] ?? null) : (fenetres[b.id] ?? null);
+              const actif = f !== null;
+              return (
+                <div key={b.id} style={{ border:`1.5px solid ${actif ? "#D4A96A" : "#e0e0e0"}`, borderRadius:10, padding:"12px 14px", background: actif ? "#fffaf5" : "#fafafa" }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom: actif ? 10 : 0 }}>
+                    <span style={{ fontSize:12, fontWeight:700, color:"#2C1810", fontFamily:"Georgia" }}>{b.name.replace("Pense Au Pain ","")}</span>
+                    <label style={{ display:"flex", alignItems:"center", gap:6, cursor:"pointer", fontSize:11, color:"#8B4513", fontWeight:700 }}>
+                      <input type="checkbox" checked={actif} onChange={e => {
+                        const next = { ...(fenetresEdit || fenetres) };
+                        next[b.id] = e.target.checked ? (FENETRES_DEFAULT[b.id] || FENETRE_DEFAULT) : null;
+                        setFenetresEdit(next);
+                      }} style={{ width:15, height:15, accentColor:"#8B4513", cursor:"pointer" }} />
+                      {actif ? "Fenêtre active" : "Pas de restriction"}
+                    </label>
+                  </div>
+                  {actif && (
+                    <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                      {[["ouverture","📅 Ouverture"],["fermeture","🔒 Fermeture"]].map(([cle,label]) => (
+                        <div key={cle} style={{ display:"flex", alignItems:"center", gap:8 }}>
+                          <span style={{ fontSize:10, fontWeight:700, color:"#8B4513", minWidth:70 }}>{label}</span>
+                          <select value={f[cle].jour} onChange={e => {
+                            const next = { ...(fenetresEdit || fenetres) };
+                            next[b.id] = { ...next[b.id], [cle]: { ...next[b.id][cle], jour: Number(e.target.value) } };
+                            setFenetresEdit(next);
+                          }} style={{ flex:2, padding:"5px 8px", border:"1.5px solid #D4A96A", borderRadius:7, background:"#fff", color:"#2C1810", fontSize:11, outline:"none", cursor:"pointer" }}>
+                            {JOURS.map((j,i) => <option key={i} value={i}>{j}</option>)}
+                          </select>
+                          <input type="number" min="0" max="23" value={f[cle].heure}
+                            onChange={e => {
+                              const next = { ...(fenetresEdit || fenetres) };
+                              next[b.id] = { ...next[b.id], [cle]: { ...next[b.id][cle], heure: Math.min(23,Math.max(0,Number(e.target.value))) } };
+                              setFenetresEdit(next);
+                            }}
+                            style={{ width:44, padding:"5px 6px", border:"1.5px solid #D4A96A", borderRadius:7, background:"#fff", color:"#2C1810", fontSize:11, outline:"none", textAlign:"center" }} />
+                          <span style={{ fontSize:11, color:"#8B4513", fontWeight:700 }}>h</span>
+                          <input type="number" min="0" max="59" value={f[cle].minute}
+                            onChange={e => {
+                              const next = { ...(fenetresEdit || fenetres) };
+                              next[b.id] = { ...next[b.id], [cle]: { ...next[b.id][cle], minute: Math.min(59,Math.max(0,Number(e.target.value))) } };
+                              setFenetresEdit(next);
+                            }}
+                            style={{ width:44, padding:"5px 6px", border:"1.5px solid #D4A96A", borderRadius:7, background:"#fff", color:"#2C1810", fontSize:11, outline:"none", textAlign:"center" }} />
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          <div style={{ display:"flex", gap:10, justifyContent:"flex-end", marginTop:16, paddingTop:14, borderTop:"1px solid #EDD5B3" }}>
+            <button onClick={() => { setShowFenetreConfig(false); setFenetresEdit(null); }} style={{ padding:"9px 18px", borderRadius:9, border:"1.5px solid #D4A96A", background:"#fff", color:"#9B7B5A", cursor:"pointer", fontSize:12, fontWeight:600 }}>Annuler</button>
+            <button onClick={() => { onSaveFenetre(fenetresEdit || fenetres); setShowFenetreConfig(false); setFenetresEdit(null); }}
+              style={{ padding:"9px 20px", borderRadius:9, border:"none", background:"linear-gradient(135deg,#8B4513,#6B3210)", color:"#fff", cursor:"pointer", fontSize:12, fontWeight:700, fontFamily:"Georgia" }}>
+              ✓ Enregistrer
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* Bannière statut fenêtre */}
+    {fenetre !== null && (
+      <div style={{
+        marginBottom:12, padding:"9px 14px", borderRadius:9, fontSize:11, fontWeight:700,
+        background: ouvert ? "#f0fff4" : "#fff5f5",
+        border: `1.5px solid ${ouvert ? "#27ae60" : "#C0392B"}`,
+        color: ouvert ? "#217346" : "#C0392B",
+        display:"flex", justifyContent:"space-between", alignItems:"center"
+      }}>
+        <span>
+          {ouvert ? "✅ Commandes ouvertes" : "🔒 Commandes fermées"} — {JOURS[fenetre.ouverture.jour]} {String(fenetre.ouverture.heure).padStart(2,"0")}h{String(fenetre.ouverture.minute).padStart(2,"0")} → {JOURS[fenetre.fermeture.jour]} {String(fenetre.fermeture.heure).padStart(2,"0")}h{String(fenetre.fermeture.minute).padStart(2,"0")}
+        </span>
+        {isAdmin && <button onClick={() => { setFenetresEdit(null); setShowFenetreConfig(true); }}
+          style={{ marginLeft:12, padding:"3px 10px", borderRadius:6, border:"1.5px solid currentColor", background:"transparent", color:"inherit", cursor:"pointer", fontSize:10, fontWeight:700 }}>
+          ⚙️ Gérer les fenêtres
+        </button>}
+      </div>
+    )}
+    {fenetre === null && isAdmin && (
+      <div style={{ marginBottom:12, textAlign:"right" }}>
+        <button onClick={() => { setFenetresEdit(null); setShowFenetreConfig(true); }}
+          style={{ padding:"5px 12px", borderRadius:7, border:"1.5px solid #D4A96A", background:"#fffaf5", color:"#8B4513", cursor:"pointer", fontSize:11, fontWeight:700 }}>
+          ⚙️ Gérer les fenêtres de commande
+        </button>
+      </div>
+    )}
+
     <div className="commande-layout">
       <div className="commande-products">
         {/* Search + boutons */}
@@ -1079,6 +1325,20 @@ function TabCommande({ cart, setCart, boulangerieId, addToHistory, produits, set
               ({favoris.length})
             </span>
           </button>
+          {favoris.length > 1 && (
+            <button onClick={() => setShowTriFavoris(true)}
+              title="Modifier l'ordre des favoris"
+              style={{
+                padding:"4px 10px", borderRadius:16, border:"1px solid #F5A623",
+                background:"#FFFDE7", color:"#B8860B", cursor:"pointer", fontSize:11,
+                fontWeight:700, display:"flex", alignItems:"center", gap:3, transition:"all .15s"
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background="#F5A623"; e.currentTarget.style.color="#fff"; }}
+              onMouseLeave={e => { e.currentTarget.style.background="#FFFDE7"; e.currentTarget.style.color="#B8860B"; }}
+            >
+              ↕ Trier
+            </button>
+          )}
           {CATEGORIES.map(c => (
             <button key={c} onClick={() => setFilterCat(c)}
               style={{
@@ -1146,6 +1406,12 @@ function TabCommande({ cart, setCart, boulangerieId, addToHistory, produits, set
                 {product.unit && product.unit !== "1" && (
                   <div style={{ fontSize:10, color:"#9B7B5A" }}>Cond. : {product.unit}</div>
                 )}
+                {product.cond_carton && product.cond_carton > 1 && (
+                  <div style={{ fontSize:10, color:"#8B4513", display:"flex", alignItems:"center", gap:3 }}>
+                    <span style={{ fontSize:9 }}>📦</span>
+                    Carton de <strong>{product.cond_carton}</strong> unités
+                  </div>
+                )}
                 {product.four && (
                   <div style={{ fontSize:10, color:"#7A8A6A", display:"flex", alignItems:"center", gap:3 }}>
                     <span style={{ fontSize:9 }}>🏭</span>
@@ -1177,40 +1443,64 @@ function TabCommande({ cart, setCart, boulangerieId, addToHistory, produits, set
                     }
                   </div>
                 )}
-                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginTop:4, gap:6 }}>
-                  <div style={{ display:"flex", flexDirection:"column", gap:2 }}>
-                    <div style={{ fontSize:13, fontWeight:700, color:"#2C1810" }}>{Number(product.prix_ht).toFixed(2)} € <span style={{ fontSize:10, color:"#9B7B5A", fontWeight:400 }}>HT</span></div>
-                    <div style={{ fontSize:10, color:"#9B7B5A" }}>{(product.prix_ht * (1 + product.tva)).toFixed(2)} € TTC</div>
+                <div style={{ display:"flex", flexDirection:"column", gap:6, marginTop:4 }}>
+                  {/* Ligne 1 : prix + bouton tarifs */}
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                    <div style={{ display:"flex", flexDirection:"column", gap:1 }}>
+                      <div style={{ fontSize:13, fontWeight:700, color:"#2C1810" }}>{Number(product.prix_ht).toFixed(2)} € <span style={{ fontSize:10, color:"#9B7B5A", fontWeight:400 }}>HT</span></div>
+                      <div style={{ fontSize:10, color:"#9B7B5A" }}>{(product.prix_ht * (1 + product.tva)).toFixed(2)} € TTC</div>
+                    </div>
+                    {product.prix_fournisseurs && Object.keys(product.prix_fournisseurs).length > 0 && (
+                      <button onClick={() => setShowPrixFour(showPrixFour === key ? null : key)}
+                        title="Voir les tarifs de tous les fournisseurs"
+                        style={{
+                          padding:"3px 8px", borderRadius:6, border:"1px solid #D4A96A",
+                          background: showPrixFour === key ? "#8B4513" : "#fffaf5",
+                          color: showPrixFour === key ? "#fff" : "#8B4513",
+                          cursor:"pointer", fontSize:10, fontWeight:700, whiteSpace:"nowrap"
+                        }}>
+                        {showPrixFour === key ? "✕ Fermer" : "📊 Tarifs"}
+                      </button>
+                    )}
                   </div>
-                  {product.prix_fournisseurs && Object.keys(product.prix_fournisseurs).length > 0 && (
-                    <button onClick={() => setShowPrixFour(showPrixFour === key ? null : key)}
-                      title="Voir les tarifs de tous les fournisseurs"
-                      style={{
-                        padding:"3px 8px", borderRadius:6, border:"1px solid #D4A96A",
-                        background: showPrixFour === key ? "#8B4513" : "#fffaf5",
-                        color: showPrixFour === key ? "#fff" : "#8B4513",
-                        cursor:"pointer", fontSize:10, fontWeight:700, whiteSpace:"nowrap"
-                      }}>
-                      {showPrixFour === key ? "✕ Fermer" : "📊 Tarifs"}
-                    </button>
-                  )}
-                  <div style={{ display:"flex", alignItems:"center", gap:4, flexShrink:0 }}>
+                  {/* Ligne 2 : conditionnement + quantité + ajouter */}
+                  <div style={{ display:"flex", alignItems:"center", gap:4, flexWrap:"wrap" }}>
                     {inCart ? (
                       <button onClick={() => setCart(prev => prev.filter(x => ((x.ref&&x.name)?`${x.ref}__${x.name}`:(x.ref||x.name)) !== key))}
-                        style={{ padding:"5px 10px", borderRadius:7, background:"linear-gradient(135deg,#8B4513,#6B3210)", color:"#fff", border:"none", cursor:"pointer", fontSize:11, fontWeight:700 }}>
-                        ✓ ×{inCart.qty} — Retirer
+                        style={{ flex:1, padding:"6px 10px", borderRadius:7, background:"linear-gradient(135deg,#8B4513,#6B3210)", color:"#fff", border:"none", cursor:"pointer", fontSize:11, fontWeight:700, textAlign:"center" }}>
+                        ✓ ×{inCart.qty}{inCart.cond_label ? ` ${inCart.cond_label}` : ""} — Retirer
                       </button>
                     ) : (
                       <>
+                        {product.cond_carton && product.cond_carton > 1 && (
+                          <select
+                            value={condModes[key] || "unite"}
+                            onChange={e => setCondModes(m => ({...m, [key]: e.target.value}))}
+                            style={{
+                              flex:1, minWidth:0, padding:"4px 5px", borderRadius:6,
+                              border:"1px solid #D4A96A", background:"#fffaf5",
+                              color:"#8B4513", fontSize:10, fontWeight:700, cursor:"pointer"
+                            }}>
+                            <option value="unite">Unité</option>
+                            <option value="carton">Carton ×{product.cond_carton}</option>
+                          </select>
+                        )}
                         <button onClick={() => setQtys(q => ({...q, [key]: Math.max(1,(q[key]||1)-1)}))}
-                          style={{ padding:"3px 8px", borderRadius:6, border:"1px solid #D4A96A", background:"#fff", cursor:"pointer", fontSize:14, lineHeight:1 }}>−</button>
+                          style={{ padding:"4px 9px", borderRadius:6, border:"1px solid #D4A96A", background:"#fff", cursor:"pointer", fontSize:14, lineHeight:1, flexShrink:0 }}>−</button>
                         <input type="number" value={qtys[key]||1} min="1"
                           onChange={e => setQtys(q => ({...q, [key]: Math.max(1,parseInt(e.target.value)||1)}))}
-                          style={{ width:44, textAlign:"center", padding:"3px 4px", border:"1px solid #D4A96A", borderRadius:6, fontSize:12, fontWeight:700, color:"#2C1810", background:"#fffaf5" }}/>
+                          style={{ width:38, textAlign:"center", padding:"3px 2px", border:"1px solid #D4A96A", borderRadius:6, fontSize:12, fontWeight:700, color:"#2C1810", background:"#fffaf5", flexShrink:0 }}/>
                         <button onClick={() => setQtys(q => ({...q, [key]: (q[key]||1)+1}))}
-                          style={{ padding:"3px 8px", borderRadius:6, border:"1px solid #D4A96A", background:"#fff", cursor:"pointer", fontSize:14, lineHeight:1 }}>+</button>
-                        <button onClick={() => { addToCart(product, qtys[key]||1); }}
-                          style={{ padding:"5px 10px", borderRadius:7, background:"linear-gradient(135deg,#C4874A,#8B4513)", color:"#fff", border:"none", cursor:"pointer", fontSize:11, fontWeight:700 }}>
+                          style={{ padding:"4px 9px", borderRadius:6, border:"1px solid #D4A96A", background:"#fff", cursor:"pointer", fontSize:14, lineHeight:1, flexShrink:0 }}>+</button>
+                        <button onClick={() => {
+                          const rawQty = qtys[key] || 1;
+                          const mode = condModes[key] || "unite";
+                          const isCarton = product.cond_carton && product.cond_carton > 1 && mode === "carton";
+                          const finalQty = isCarton ? rawQty * product.cond_carton : rawQty;
+                          const condLabel = isCarton ? `carton×${product.cond_carton}` : null;
+                          addToCart({ ...product, ...(condLabel ? { cond_label: condLabel } : {}) }, finalQty);
+                        }}
+                          style={{ flex:1, minWidth:0, padding:"6px 8px", borderRadius:7, background:"linear-gradient(135deg,#C4874A,#8B4513)", color:"#fff", border:"none", cursor:"pointer", fontSize:11, fontWeight:700, textAlign:"center" }}>
                           + Ajouter
                         </button>
                       </>
@@ -1229,13 +1519,180 @@ function TabCommande({ cart, setCart, boulangerieId, addToHistory, produits, set
         )}
       </div>
       <div className="commande-cart">
-        <CartPanel cart={cart} setCart={setCart} boulangerieId={boulangerieId} addToHistory={addToHistory} />
+        <CartPanel cart={cart} setCart={setCart} boulangerieId={boulangerieId} addToHistory={addToHistory} isAdmin={isAdmin} fenetre={fenetre} />
       </div>
     </div>
 
     {/* Barre panier fixe mobile */}
-    <MobileCartBar cart={cart} boulangerieId={boulangerieId} setCart={setCart} addToHistory={addToHistory} />
+    <MobileCartBar cart={cart} boulangerieId={boulangerieId} setCart={setCart} addToHistory={addToHistory} isAdmin={isAdmin} fenetre={fenetre} />
     </>
+  );
+}
+
+// ─── ANNONCES ────────────────────────────────────────────────────────────────
+
+function PopupAnnonce({ annonce, onClose }) {
+  if (!annonce) return null;
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.55)", zIndex:1400, display:"flex", alignItems:"center", justifyContent:"center" }}>
+      <div style={{
+        background:"#fff", borderRadius:16, padding:32, width:500, maxWidth:"92vw",
+        boxShadow:"0 12px 50px rgba(0,0,0,.3)", border:"3px solid #D4A96A",
+        animation:"fadeIn .2s ease"
+      }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:16 }}>
+          <div>
+            <div style={{ fontSize:10, color:"#9B7B5A", fontWeight:700, letterSpacing:1, marginBottom:4, textTransform:"uppercase" }}>
+              📣 Message de la direction
+            </div>
+            <h3 style={{ margin:0, fontFamily:"Georgia", color:"#2C1810", fontSize:18, lineHeight:1.3 }}>
+              {annonce.titre}
+            </h3>
+          </div>
+        </div>
+
+        <div style={{
+          fontSize:13, color:"#2C1810", lineHeight:1.7, whiteSpace:"pre-wrap",
+          background:"#fffaf5", border:"1px solid #EDD5B3", borderRadius:10,
+          padding:"14px 16px", marginBottom:20, minHeight:60
+        }}>
+          {annonce.message}
+        </div>
+
+        {annonce.expiration && (
+          <div style={{ fontSize:10, color:"#9B7B5A", marginBottom:14, textAlign:"right" }}>
+            Valide jusqu'au {annonce.expiration}
+          </div>
+        )}
+
+        <button onClick={onClose}
+          style={{
+            width:"100%", padding:"12px 0", borderRadius:10, border:"none",
+            background:"linear-gradient(135deg,#8B4513,#6B3210)", color:"#fff",
+            cursor:"pointer", fontWeight:700, fontSize:13, fontFamily:"Georgia, serif",
+            boxShadow:"0 3px 12px rgba(139,69,19,.35)"
+          }}>
+          ✓ J'ai lu ce message
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ModalGererAnnonces({ annonces, onSave, onDelete, onClose }) {
+  const [mode, setMode] = useState("liste"); // "liste" | "new"
+  const [titre, setTitre] = useState("");
+  const [message, setMessage] = useState("");
+  const [expiration, setExpiration] = useState("");
+  const [cibles, setCibles] = useState(new Set(BOULANGERIES.map(b => b.id)));
+  const [saving, setSaving] = useState(false);
+
+  const inputStyle = { width:"100%", padding:"8px 12px", border:"1.5px solid #D4A96A", borderRadius:8, background:"#fffaf5", fontSize:12, color:"#2C1810", outline:"none", boxSizing:"border-box", fontFamily:"inherit" };
+
+  const handleSave = async () => {
+    if (!titre.trim() || !message.trim() || !expiration) return;
+    setSaving(true);
+    const annonce = {
+      id: "ANN-" + Date.now(),
+      titre: titre.trim(),
+      message: message.trim(),
+      expiration,
+      cibles: [...cibles],
+      date: new Date().toLocaleDateString("fr-FR"),
+    };
+    await onSave(annonce);
+    setSaving(false);
+    setMode("liste");
+    setTitre(""); setMessage(""); setExpiration(""); setCibles(new Set(BOULANGERIES.map(b => b.id)));
+  };
+
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.55)", zIndex:1300, display:"flex", alignItems:"center", justifyContent:"center" }}>
+      <div style={{ background:"#fff", borderRadius:14, padding:28, width:520, maxWidth:"95vw", maxHeight:"90vh", display:"flex", flexDirection:"column", boxShadow:"0 8px 40px rgba(0,0,0,.25)", border:"2px solid #D4A96A" }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:18 }}>
+          <h3 style={{ margin:0, fontFamily:"Georgia", color:"#2C1810", fontSize:15 }}>📣 Gérer les annonces</h3>
+          <button onClick={onClose} style={{ background:"none", border:"none", fontSize:20, cursor:"pointer", color:"#9B7B5A" }}>✕</button>
+        </div>
+
+        {mode === "liste" ? (
+          <>
+            <button onClick={() => setMode("new")}
+              style={{ marginBottom:16, padding:"9px 18px", borderRadius:9, border:"none", background:"linear-gradient(135deg,#8B4513,#6B3210)", color:"#fff", cursor:"pointer", fontSize:12, fontWeight:700, fontFamily:"Georgia", alignSelf:"flex-start" }}>
+              ✚ Nouvelle annonce
+            </button>
+            {annonces.length === 0 ? (
+              <div style={{ textAlign:"center", padding:30, color:"#b89878", fontSize:12 }}>Aucune annonce active</div>
+            ) : (
+              <div style={{ flex:1, overflowY:"auto", display:"flex", flexDirection:"column", gap:10 }}>
+                {annonces.map(a => {
+                  const expiree = a.expiration && new Date(a.expiration) < new Date();
+                  return (
+                    <div key={a.id} style={{ border:`1.5px solid ${expiree ? "#ddd" : "#D4A96A"}`, borderRadius:10, padding:"12px 14px", background: expiree ? "#fafafa" : "#fffaf5", opacity: expiree ? 0.6 : 1 }}>
+                      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:8 }}>
+                        <div style={{ flex:1 }}>
+                          <div style={{ fontSize:13, fontWeight:700, color:"#2C1810", fontFamily:"Georgia", marginBottom:3 }}>{a.titre}</div>
+                          <div style={{ fontSize:11, color:"#555", marginBottom:6, lineHeight:1.5 }}>{a.message.substring(0,100)}{a.message.length > 100 ? "…" : ""}</div>
+                          <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+                            <span style={{ fontSize:10, color:"#9B7B5A" }}>📅 Expire le {a.expiration}</span>
+                            <span style={{ fontSize:10, color: expiree ? "#C0392B" : "#217346", fontWeight:700 }}>{expiree ? "⚠ Expirée" : "✅ Active"}</span>
+                          </div>
+                          <div style={{ fontSize:10, color:"#9B7B5A", marginTop:4 }}>
+                            Cibles : {a.cibles?.length === BOULANGERIES.length ? "Toutes" : a.cibles?.map(id => BOULANGERIES.find(b => b.id === id)?.name.replace("Pense Au Pain ","")).join(", ")}
+                          </div>
+                        </div>
+                        <button onClick={() => onDelete(a.id)}
+                          style={{ padding:"4px 10px", borderRadius:7, border:"1.5px solid #e74c3c", background:"#fff5f5", color:"#c0392b", cursor:"pointer", fontSize:11, fontWeight:700, flexShrink:0 }}>
+                          🗑 Supprimer
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </>
+        ) : (
+          <div style={{ flex:1, overflowY:"auto", display:"flex", flexDirection:"column", gap:14 }}>
+            <div>
+              <label style={{ fontSize:11, fontWeight:700, color:"#8B4513", display:"block", marginBottom:4 }}>Titre *</label>
+              <input value={titre} onChange={e => setTitre(e.target.value)} placeholder="Ex: Fermeture exceptionnelle lundi" style={inputStyle} autoFocus />
+            </div>
+            <div>
+              <label style={{ fontSize:11, fontWeight:700, color:"#8B4513", display:"block", marginBottom:4 }}>Message *</label>
+              <textarea value={message} onChange={e => setMessage(e.target.value)} rows={5}
+                placeholder="Écrivez votre message ici…"
+                style={{ ...inputStyle, resize:"vertical" }} />
+            </div>
+            <div>
+              <label style={{ fontSize:11, fontWeight:700, color:"#8B4513", display:"block", marginBottom:4 }}>Date d'expiration *</label>
+              <input type="date" value={expiration} onChange={e => setExpiration(e.target.value)} style={inputStyle} min={new Date().toISOString().split("T")[0]} />
+            </div>
+            <div>
+              <label style={{ fontSize:11, fontWeight:700, color:"#8B4513", display:"block", marginBottom:8 }}>Destinataires</label>
+              <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+                <button onClick={() => setCibles(new Set(BOULANGERIES.map(b => b.id)))}
+                  style={{ fontSize:10, padding:"3px 10px", borderRadius:6, border:"1px solid #D4A96A", background: cibles.size === BOULANGERIES.length ? "#8B4513" : "#fffaf5", color: cibles.size === BOULANGERIES.length ? "#fff" : "#8B4513", cursor:"pointer", fontWeight:700 }}>
+                  Toutes
+                </button>
+                {BOULANGERIES.map(b => (
+                  <button key={b.id} onClick={() => setCibles(prev => { const n = new Set(prev); n.has(b.id) ? n.delete(b.id) : n.add(b.id); return n; })}
+                    style={{ fontSize:10, padding:"3px 10px", borderRadius:6, border:"1px solid #D4A96A", background: cibles.has(b.id) ? "#8B4513" : "#fffaf5", color: cibles.has(b.id) ? "#fff" : "#8B4513", cursor:"pointer", fontWeight:700 }}>
+                    {b.name.replace("Pense Au Pain ","")}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div style={{ display:"flex", gap:10, marginTop:6 }}>
+              <button onClick={() => setMode("liste")} style={{ flex:1, padding:"9px 0", borderRadius:9, border:"1.5px solid #D4A96A", background:"#fff", color:"#9B7B5A", cursor:"pointer", fontSize:12, fontWeight:600 }}>Annuler</button>
+              <button onClick={handleSave} disabled={!titre.trim() || !message.trim() || !expiration || cibles.size === 0 || saving}
+                style={{ flex:2, padding:"9px 0", borderRadius:9, border:"none", background: titre && message && expiration && cibles.size > 0 ? "linear-gradient(135deg,#8B4513,#6B3210)" : "#ccc", color:"#fff", cursor: titre && message && expiration ? "pointer" : "default", fontSize:12, fontWeight:700, fontFamily:"Georgia" }}>
+                {saving ? "⏳ Envoi…" : "📣 Publier l'annonce"}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -1255,17 +1712,31 @@ function genererBonsFournisseurs(cmd, items) {
     groupes[four].push(item);
   });
 
-  Object.entries(groupes).forEach(([fournisseur, produits]) => {
-    const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
-    const W = 210;
-    const marge = 18;
+  const entries = Object.entries(groupes);
+  if (entries.length === 0) return;
+
+  // Un seul PDF, une page par fournisseur (évite le blocage navigateur des téléchargements multiples)
+  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+  const W = 210;
+  const marge = 18;
+
+  const cols = [
+    { label: "Réf.",        x: marge + 2,   w: 22 },
+    { label: "Désignation", x: marge + 24,  w: 80 },
+    { label: "Cond.",       x: marge + 104, w: 22 },
+    { label: "Qté",         x: marge + 126, w: 14 },
+    { label: "P.U. HT",    x: marge + 140, w: 24 },
+    { label: "Total HT",   x: marge + 164, w: 10 },
+  ];
+
+  entries.forEach(([fournisseur, produits], idx) => {
+    if (idx > 0) doc.addPage();
     let y = 0;
 
     // ── Fond header ──
     doc.setFillColor(44, 24, 16);
     doc.rect(0, 0, W, 42, "F");
 
-    // Logo texte (le vrai logo nécessiterait une conversion base64)
     doc.setTextColor(212, 169, 106);
     doc.setFontSize(22);
     doc.setFont("helvetica", "bold");
@@ -1276,7 +1747,6 @@ function genererBonsFournisseurs(cmd, items) {
     doc.setTextColor(180, 140, 90);
     doc.text("BOULANGERIE — PÂTISSERIE", marge, 22);
 
-    // Boulangerie commandante
     doc.setFontSize(11);
     doc.setTextColor(255, 255, 255);
     doc.setFont("helvetica", "bold");
@@ -1339,14 +1809,6 @@ function genererBonsFournisseurs(cmd, items) {
     doc.setTextColor(212, 169, 106);
     doc.setFontSize(8);
     doc.setFont("helvetica", "bold");
-    const cols = [
-      { label: "Réf.",      x: marge + 2,   w: 22 },
-      { label: "Désignation", x: marge + 24, w: 80 },
-      { label: "Cond.",     x: marge + 104,  w: 22 },
-      { label: "Qté",       x: marge + 126,  w: 14 },
-      { label: "P.U. HT",   x: marge + 140,  w: 24 },
-      { label: "Total HT",  x: marge + 164,  w: 10 },
-    ];
     cols.forEach(c => doc.text(c.label, c.x, y + 5.5));
     y += 8;
 
@@ -1355,7 +1817,6 @@ function genererBonsFournisseurs(cmd, items) {
     let totalHT = 0;
     produits.forEach((item, i) => {
       const rowH = 7;
-      // alternance
       if (i % 2 === 0) {
         doc.setFillColor(255, 250, 245);
         doc.rect(marge, y, W - marge * 2, rowH, "F");
@@ -1364,25 +1825,24 @@ function genererBonsFournisseurs(cmd, items) {
       doc.setLineWidth(0.2);
       doc.line(marge, y + rowH, W - marge, y + rowH);
 
-      const ligneHT = item.prix_ht * item.qty;
+      const ligneHT = (item.prix_ht || 0) * (item.qty || 1);
       totalHT += ligneHT;
 
       doc.setTextColor(44, 24, 16);
       doc.setFontSize(7.5);
-      doc.text(item.ref || "—",                   cols[0].x, y + 4.8);
-      doc.text(item.name.substring(0, 45),        cols[1].x, y + 4.8);
-      doc.text(item.unit || "—",                  cols[2].x, y + 4.8);
+      doc.text(item.ref || "—",                cols[0].x, y + 4.8);
+      doc.text((item.name || "").substring(0, 45), cols[1].x, y + 4.8);
+      doc.text(String(item.unit || "—"),       cols[2].x, y + 4.8);
       doc.setFont("helvetica", "bold");
-      doc.text(String(item.qty),                  cols[3].x, y + 4.8);
+      doc.text(String(item.qty || 1),          cols[3].x, y + 4.8);
       doc.setFont("helvetica", "normal");
-      doc.text(fmt(item.prix_ht),                 cols[4].x, y + 4.8);
+      doc.text(fmt(item.prix_ht || 0),         cols[4].x, y + 4.8);
       doc.setFont("helvetica", "bold");
-      doc.text(fmt(ligneHT),                      cols[5].x, y + 4.8);
+      doc.text(fmt(ligneHT),                   cols[5].x, y + 4.8);
       doc.setFont("helvetica", "normal");
 
       y += rowH;
 
-      // Nouvelle page si besoin
       if (y > 265) {
         doc.addPage();
         y = 20;
@@ -1429,11 +1889,82 @@ function genererBonsFournisseurs(cmd, items) {
       `Document généré le ${new Date().toLocaleDateString("fr-FR")} — Pense Au Pain`,
       W / 2, 290, { align: "center" }
     );
-
-    // Téléchargement
-    const nomFichier = `bon-commande_${cmd.id}_${fournisseur.replace(/\s+/g, "-")}.pdf`;
-    doc.save(nomFichier);
   });
+
+  // Un seul save = un seul téléchargement, pas de blocage navigateur
+  const nomFichier = `bons-commande_${cmd.id}.pdf`;
+  doc.save(nomFichier);
+}
+
+function ModalSelectionFournisseurs({ items, cmd, onClose }) {
+  const fours = [...new Set(items.map(i => i.four || "Fournisseur non renseigné"))].sort();
+  const [selected, setSelected] = useState(new Set(fours));
+
+  const toggle = (f) => setSelected(prev => {
+    const next = new Set(prev);
+    next.has(f) ? next.delete(f) : next.add(f);
+    return next;
+  });
+
+  const handleGenerate = () => {
+    if (selected.size === 0) return;
+    const filteredItems = items.filter(i => selected.has(i.four || "Fournisseur non renseigné"));
+    genererBonsFournisseurs(cmd, filteredItems);
+    onClose();
+  };
+
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.55)", zIndex:1200, display:"flex", alignItems:"center", justifyContent:"center" }}>
+      <div style={{ background:"#fff", borderRadius:14, padding:28, width:420, maxWidth:"94vw", boxShadow:"0 8px 40px rgba(0,0,0,.3)", border:"2px solid #D4A96A" }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:18 }}>
+          <h3 style={{ margin:0, fontFamily:"Georgia", color:"#2C1810", fontSize:15 }}>📄 Sélectionner les fournisseurs</h3>
+          <button onClick={onClose} style={{ background:"none", border:"none", fontSize:20, cursor:"pointer", color:"#9B7B5A" }}>✕</button>
+        </div>
+        <div style={{ fontSize:11, color:"#9B7B5A", marginBottom:14 }}>
+          Cochez les fournisseurs pour lesquels générer un bon de commande PDF.
+        </div>
+        <div style={{ display:"flex", gap:8, marginBottom:14 }}>
+          <button onClick={() => setSelected(new Set(fours))} style={{ fontSize:11, padding:"4px 10px", borderRadius:6, border:"1px solid #D4A96A", background:"#fffaf5", color:"#8B4513", cursor:"pointer", fontWeight:700 }}>Tout sélectionner</button>
+          <button onClick={() => setSelected(new Set())} style={{ fontSize:11, padding:"4px 10px", borderRadius:6, border:"1px solid #ccc", background:"#fff", color:"#999", cursor:"pointer" }}>Tout désélectionner</button>
+        </div>
+        <div style={{ display:"flex", flexDirection:"column", gap:8, maxHeight:280, overflowY:"auto", marginBottom:20 }}>
+          {fours.map(f => {
+            const count = items.filter(i => (i.four || "Fournisseur non renseigné") === f).length;
+            const isSelected = selected.has(f);
+            return (
+              <label key={f} style={{
+                display:"flex", alignItems:"center", gap:12, padding:"10px 14px",
+                borderRadius:9, border:`2px solid ${isSelected ? "#8B4513" : "#EDD5B3"}`,
+                background: isSelected ? "#fffaf5" : "#fff",
+                cursor:"pointer", transition:"all .12s"
+              }}>
+                <input type="checkbox" checked={isSelected} onChange={() => toggle(f)}
+                  style={{ width:16, height:16, accentColor:"#8B4513", cursor:"pointer", flexShrink:0 }} />
+                <div style={{ flex:1 }}>
+                  <div style={{ fontSize:12, fontWeight:700, color:"#2C1810", fontFamily:"Georgia" }}>{f}</div>
+                  <div style={{ fontSize:10, color:"#9B7B5A", marginTop:2 }}>{count} produit{count > 1 ? "s" : ""}</div>
+                </div>
+                {isSelected && <span style={{ fontSize:13 }}>✅</span>}
+              </label>
+            );
+          })}
+        </div>
+        <div style={{ display:"flex", gap:10, justifyContent:"flex-end" }}>
+          <button onClick={onClose} style={{ padding:"9px 18px", borderRadius:9, border:"1.5px solid #D4A96A", background:"#fff", color:"#9B7B5A", cursor:"pointer", fontSize:12, fontWeight:600 }}>Annuler</button>
+          <button onClick={handleGenerate} disabled={selected.size === 0}
+            style={{
+              padding:"9px 20px", borderRadius:9, border:"none",
+              background: selected.size === 0 ? "#ccc" : "linear-gradient(135deg,#8B4513,#6B3210)",
+              color:"#fff", cursor: selected.size === 0 ? "default" : "pointer",
+              fontSize:12, fontWeight:700, fontFamily:"Georgia, serif",
+              boxShadow: selected.size > 0 ? "0 3px 12px rgba(139,69,19,.35)" : "none"
+            }}>
+            📄 Générer {selected.size > 0 ? `(${selected.size} fournisseur${selected.size > 1 ? "s" : ""})` : ""}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function DetailCommande({ cmd, onClose, onUpdateStatus, onUpdateCommande }) {
@@ -1445,6 +1976,7 @@ function DetailCommande({ cmd, onClose, onUpdateStatus, onUpdateCommande }) {
   const [items, setItems] = useState(initialItems);
   const [editingFour, setEditingFour] = useState(null);
   const [viewMode, setViewMode] = useState("liste"); // "liste" ou "fournisseur"
+  const [showModalFournisseurs, setShowModalFournisseurs] = useState(false);
   const statusColor = { "Livré": "#217346", "En cours": "#E67E22", "Annulé": "#C0392B" };
   const statuts = ["En cours", "Livré", "Annulé"];
   const [updating, setUpdating] = useState(false);
@@ -1468,6 +2000,7 @@ function DetailCommande({ cmd, onClose, onUpdateStatus, onUpdateCommande }) {
   };
 
   return (
+    <>
     <div style={{
       position:"fixed", inset:0, background:"rgba(0,0,0,.45)", zIndex:1000,
       display:"flex", alignItems:"center", justifyContent:"center"
@@ -1660,7 +2193,7 @@ function DetailCommande({ cmd, onClose, onUpdateStatus, onUpdateCommande }) {
                 const fours = [...new Set(items.map(i => i.four || "Non renseigné"))];
                 return <span style={{ fontSize:11, color:"#9B7B5A" }}>{fours.length} fournisseur(s) : {fours.join(", ")}</span>;
               })()}
-              <button onClick={() => genererBonsFournisseurs(cmd, items)}
+              <button onClick={() => setShowModalFournisseurs(true)}
                 style={{
                   display:"inline-flex", alignItems:"center", gap:6,
                   padding:"9px 18px", borderRadius:9, border:"none",
@@ -1679,6 +2212,14 @@ function DetailCommande({ cmd, onClose, onUpdateStatus, onUpdateCommande }) {
         )}
         </div>
     </div>
+    {showModalFournisseurs && items.length > 0 && (
+      <ModalSelectionFournisseurs
+        items={items}
+        cmd={cmd}
+        onClose={() => setShowModalFournisseurs(false)}
+      />
+    )}
+    </>
   );
 }
 function ModifierCommande({ cmd, onClose, onSave }) {
@@ -1691,6 +2232,10 @@ function ModifierCommande({ cmd, onClose, onSave }) {
   const [boulangerie, setBoulangerie] = useState(cmd.boulangerie);
   const [search, setSearch] = useState("");
   const [saving, setSaving] = useState(false);
+  const [horsNom, setHorsNom] = useState("");
+  const [horsUnite, setHorsUnite] = useState("");
+  const [horsQty, setHorsQty] = useState(1);
+  const [showHors, setShowHors] = useState(false);
 
   const totalTTC = items.reduce((s, i) => s + i.prix_ht * (1 + (i.tva || 0.055)) * i.qty, 0);
   const removeItem = (key) => setItems(prev => prev.filter(i => (i.ref || i.name) !== key));
@@ -1706,6 +2251,12 @@ function ModifierCommande({ cmd, onClose, onSave }) {
     : [];
 
   const addProduct = (p) => { setItems(prev => [...prev, { ...p, qty: 1 }]); setSearch(""); };
+
+  const addHorsMercuriale = () => {
+    if (!horsNom.trim()) return;
+    setItems(prev => [...prev, { ref:"", name: horsNom.trim(), unit: horsUnite.trim() || "—", prix_ht: 0, tva: 0.055, cat:"Hors mercuriale", qty: horsQty }]);
+    setHorsNom(""); setHorsUnite(""); setHorsQty(1); setShowHors(false);
+  };
 
   const handleSave = async () => {
     if (items.length === 0) return;
@@ -1746,25 +2297,49 @@ function ModifierCommande({ cmd, onClose, onSave }) {
           />
           {suggestions.length > 0 && (
             <div style={{ position:"absolute", top:"100%", left:0, right:0, background:"#fff", border:"2px solid #D4A96A", borderRadius:8, boxShadow:"0 4px 20px rgba(0,0,0,.15)", zIndex:10, maxHeight:200, overflowY:"auto" }}>
-              {suggestions.map(p => {
-                const meilleur = meilleurFournisseurPour(p);
-                const alternative = meilleur && meilleur.fournisseur !== p.four && meilleur.prix < p.prix_ht - 0.005 ? meilleur : null;
-                return (
-                  <div key={p.ref || p.name} onClick={() => addProduct(p)}
-                    style={{ padding:"8px 14px", cursor:"pointer", borderBottom:"1px solid #f0e8d8", display:"flex", justifyContent:"space-between", alignItems:"center" }}
-                    onMouseEnter={e => e.currentTarget.style.background="#fffaf5"}
-                    onMouseLeave={e => e.currentTarget.style.background="#fff"}
-                  >
-                    <span style={{ fontSize:12, color:"#2C1810", fontWeight:600 }}>{p.name}</span>
-                    <span style={{ textAlign:"right" }}>
-                      <span style={{ fontSize:11, color:"#9B7B5A", display:"block" }}>{fmt(p.prix_ht)} HT · {p.four}</span>
-                      {alternative && (
-                        <span style={{ fontSize:10, color:"#1B7A3D", fontWeight:600 }}>💡 {fmt(alternative.prix)} chez {alternative.fournisseur}</span>
-                      )}
-                    </span>
-                  </div>
-                );
-              })}
+              {suggestions.map(p => (
+                <div key={p.ref || p.name} onClick={() => addProduct(p)}
+                  style={{ padding:"8px 14px", cursor:"pointer", borderBottom:"1px solid #f0e8d8", display:"flex", justifyContent:"space-between", alignItems:"center" }}
+                  onMouseEnter={e => e.currentTarget.style.background="#fffaf5"}
+                  onMouseLeave={e => e.currentTarget.style.background="#fff"}
+                >
+                  <span style={{ fontSize:12, color:"#2C1810", fontWeight:600 }}>{p.name}</span>
+                  <span style={{ fontSize:11, color:"#9B7B5A" }}>{fmt(p.prix_ht)} HT · {p.four}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Produit hors mercuriale */}
+        <div style={{ marginBottom:14 }}>
+          <button onClick={() => setShowHors(v => !v)}
+            style={{ fontSize:11, fontWeight:700, color:"#8B4513", background:"#fffaf5", border:"1.5px dashed #D4A96A", borderRadius:7, padding:"5px 12px", cursor:"pointer" }}>
+            {showHors ? "✕ Annuler" : "✏️ Ajouter un produit hors mercuriale"}
+          </button>
+          {showHors && (
+            <div style={{ marginTop:10, display:"flex", gap:8, flexWrap:"wrap", alignItems:"flex-end", background:"#fffaf5", border:"1.5px solid #D4A96A", borderRadius:9, padding:"12px 14px" }}>
+              <div style={{ flex:2, minWidth:140 }}>
+                <div style={{ fontSize:10, fontWeight:700, color:"#7A5C3A", marginBottom:3 }}>Désignation *</div>
+                <input value={horsNom} onChange={e => setHorsNom(e.target.value)}
+                  placeholder="Ex: Produit spécial"
+                  style={{ width:"100%", padding:"7px 10px", border:"1.5px solid #D4A96A", borderRadius:7, fontSize:12, outline:"none", background:"#fff", boxSizing:"border-box" }} />
+              </div>
+              <div style={{ flex:1, minWidth:100 }}>
+                <div style={{ fontSize:10, fontWeight:700, color:"#7A5C3A", marginBottom:3 }}>Conditionnement</div>
+                <input value={horsUnite} onChange={e => setHorsUnite(e.target.value)}
+                  placeholder="Ex: Sac 5kg"
+                  style={{ width:"100%", padding:"7px 10px", border:"1.5px solid #D4A96A", borderRadius:7, fontSize:12, outline:"none", background:"#fff", boxSizing:"border-box" }} />
+              </div>
+              <div style={{ display:"flex", alignItems:"center", gap:4 }}>
+                <button onClick={() => setHorsQty(q => Math.max(1, q-1))} style={{ width:26, height:26, borderRadius:6, border:"1px solid #D4A96A", background:"#fff", cursor:"pointer", fontSize:14 }}>−</button>
+                <span style={{ width:28, textAlign:"center", fontSize:13, fontWeight:700, color:"#2C1810" }}>{horsQty}</span>
+                <button onClick={() => setHorsQty(q => q+1)} style={{ width:26, height:26, borderRadius:6, border:"1px solid #D4A96A", background:"#fff", cursor:"pointer", fontSize:14 }}>+</button>
+              </div>
+              <button onClick={addHorsMercuriale} disabled={!horsNom.trim()}
+                style={{ padding:"7px 14px", borderRadius:7, border:"none", background: horsNom.trim() ? "linear-gradient(135deg,#8B4513,#6B3210)" : "#ccc", color:"#fff", cursor: horsNom.trim() ? "pointer":"default", fontSize:11, fontWeight:700 }}>
+                + Ajouter
+              </button>
             </div>
           )}
         </div>
@@ -1783,20 +2358,11 @@ function ModifierCommande({ cmd, onClose, onSave }) {
               <tbody>
                 {items.map((item, i) => {
                   const key = item.ref || item.name;
-                  const meilleur = meilleurFournisseurPour(item);
-                  const alternative = meilleur && meilleur.fournisseur !== item.four && meilleur.prix < item.prix_ht - 0.005 ? meilleur : null;
                   return (
                     <tr key={key} style={{ background: i%2===0 ? "#fffaf5" : "#fff" }}>
                       <td style={{ padding:"7px 10px", fontSize:10, color:"#8B4513", fontFamily:"monospace", borderRadius:"6px 0 0 6px" }}>{item.ref || "—"}</td>
                       <td style={{ padding:"7px 10px", fontSize:11, color:"#2C1810", fontWeight:600 }}>{item.name}</td>
-                      <td style={{ padding:"7px 10px", fontSize:10, color:"#7A5C3A" }}>
-                        {item.four || "—"}
-                        {alternative && (
-                          <div title="Moins cher chez un autre fournisseur, d'après votre mercuriale" style={{ fontSize:9, color:"#1B7A3D", fontWeight:700, marginTop:2 }}>
-                            💡 {fmt(alternative.prix)} chez {alternative.fournisseur}
-                          </div>
-                        )}
-                      </td>
+                      <td style={{ padding:"7px 10px", fontSize:10, color:"#7A5C3A" }}>{item.four || "—"}</td>
                       <td style={{ padding:"7px 10px" }}>
                         <div style={{ display:"flex", alignItems:"center", gap:4 }}>
                           <button onClick={() => changeQty(key, -1)} style={{ width:22, height:22, borderRadius:5, border:"1px solid #D4A96A", background:"#fff8f0", cursor:"pointer", fontSize:13 }}>−</button>
@@ -2128,10 +2694,11 @@ function TabEmballages({ emballages, boulangerieId, isAdmin, onAjouter, onModifi
   );
 }
 
-function TabHistorique({ history, onUpdateStatus, onUpdateCommande, isAdmin }) {
+function TabHistorique({ history, onUpdateStatus, onUpdateCommande, onAddCommande, isAdmin, fenetres }) {
   const [filterB, setFilterB] = useState("Tous");
   const [filterStatus, setFilterStatus] = useState("Tous");
   const [filterType, setFilterType] = useState("Tous");
+  const [showArchives, setShowArchives] = useState(false);
   const [cmdDetail, setCmdDetail] = useState(null);
   const [cmdModif, setCmdModif] = useState(null);
   const [fusionMode, setFusionMode] = useState(false);
@@ -2139,11 +2706,16 @@ function TabHistorique({ history, onUpdateStatus, onUpdateCommande, isAdmin }) {
   const [showFusionConfirm, setShowFusionConfirm] = useState(false);
 
   const filtered = history.filter(c => {
-    return c.status !== "Fusionné" &&
-           (filterB === "Tous" || c.boulangerie === filterB) &&
+    const estArchivee = c.status === "Archivé";
+    const estFusionnee = c.status === "Fusionné";
+    if (estFusionnee) return false;
+    if (!showArchives && estArchivee) return false;
+    return (filterB === "Tous" || c.boulangerie === filterB) &&
            (filterStatus === "Tous" || c.status === filterStatus) &&
            (filterType === "Tous" || c.type === filterType);
   });
+
+  const nbArchives = history.filter(c => c.status === "Archivé").length;
 
   const statusColor = { "Livré": "#217346", "En cours": "#E67E22", "Annulé": "#C0392B" };
   const bNames = ["Tous", ...BOULANGERIES.map(b => b.name)];
@@ -2189,6 +2761,17 @@ function TabHistorique({ history, onUpdateStatus, onUpdateCommande, isAdmin }) {
           {["Tous","Matières premières","Emballages"].map(t => <option key={t}>{t}</option>)}
         </select>
         <span style={{ fontSize:11, color:"#9B7B5A", whiteSpace:"nowrap" }}>{filtered.length} commande(s)</span>
+        {nbArchives > 0 && (
+          <button onClick={() => setShowArchives(v => !v)}
+            style={{
+              padding:"7px 14px", borderRadius:8, fontSize:11, fontWeight:700, cursor:"pointer",
+              border: showArchives ? "none" : "1.5px solid #7A8A6A",
+              background: showArchives ? "#4A6741" : "#fff",
+              color: showArchives ? "#fff" : "#4A6741",
+            }}>
+            {showArchives ? "🗂 Masquer archives" : `🗂 Archives (${nbArchives})`}
+          </button>
+        )}
         {isAdmin && (
           <button onClick={() => { setFusionMode(!fusionMode); setFusionSelection([]); }}
             style={{
@@ -2281,10 +2864,9 @@ function TabHistorique({ history, onUpdateStatus, onUpdateCommande, isAdmin }) {
                     detail: mergedDetail,
                     status: "En cours"
                   };
-                  // Sauvegarder la fusionnée
-                  await onUpdateCommande(fusionnee);
-                  // Supprimer les deux originales via updateStatus Annulé puis filtrage
-                  // On utilise un statut spécial "Fusionné" pour les masquer
+                  // Ajouter la nouvelle commande fusionnée (nouvel ID)
+                  await onAddCommande(fusionnee);
+                  // Masquer les deux originales avec statut "Fusionné"
                   await onUpdateStatus(c1.id, "Fusionné");
                   await onUpdateStatus(c2.id, "Fusionné");
                   setShowFusionConfirm(false);
@@ -2341,8 +2923,12 @@ function TabHistorique({ history, onUpdateStatus, onUpdateCommande, isAdmin }) {
                       {cmd.type === "Emballages" ? "📦 Emballages" : "🌾 Mat. premières"}
                     </span>
                   </div>
-                  <span style={{ padding:"3px 10px", borderRadius:10, background:statusColor[cmd.status]+"22", color:statusColor[cmd.status], fontSize:11, fontWeight:700 }}>
-                    {cmd.status}
+                  <span style={{
+                    padding:"3px 10px", borderRadius:10, fontSize:11, fontWeight:700,
+                    background: cmd.status === "Archivé" ? "#4A674122" : (statusColor[cmd.status]||"#ccc")+"22",
+                    color: cmd.status === "Archivé" ? "#4A6741" : (statusColor[cmd.status]||"#666"),
+                  }}>
+                    {cmd.status === "Archivé" ? "🗂 Archivé" : cmd.status}
                   </span>
                 </div>
 
@@ -2366,13 +2952,37 @@ function TabHistorique({ history, onUpdateStatus, onUpdateCommande, isAdmin }) {
                     onMouseLeave={e => { e.currentTarget.style.background="#fffaf5"; e.currentTarget.style.color="#8B4513"; }}
                   >👁 Voir</button>
 
-                  <button onClick={() => setCmdModif(cmd)}
-                    style={{ flex:1, minWidth:80, padding:"7px 6px", borderRadius:7, border:"1.5px solid #A0B0D0", background:"#f0f4ff", color:"#3A5A9B", cursor:"pointer", fontSize:11, fontWeight:700, transition:"all .15s" }}
-                    onMouseEnter={e => { e.currentTarget.style.background="#3A5A9B"; e.currentTarget.style.color="#fff"; }}
-                    onMouseLeave={e => { e.currentTarget.style.background="#f0f4ff"; e.currentTarget.style.color="#3A5A9B"; }}
-                  >✏️ Modifier</button>
+                  {(() => {
+                    const boulId = BOULANGERIES.find(b => b.name === cmd.boulangerie)?.id;
+                    const f = getFenetrePour(fenetres, boulId);
+                    const peutModifier = isAdmin || f === null || commandeOuverte(f);
+                    return (
+                      <button onClick={() => peutModifier && setCmdModif(cmd)}
+                        style={{ flex:1, minWidth:80, padding:"7px 6px", borderRadius:7, border:`1.5px solid ${peutModifier ? "#A0B0D0" : "#ccc"}`, background: peutModifier ? "#f0f4ff" : "#f5f5f5", color: peutModifier ? "#3A5A9B" : "#aaa", cursor: peutModifier ? "pointer" : "not-allowed", fontSize:11, fontWeight:700, transition:"all .15s" }}
+                        onMouseEnter={e => { if(peutModifier) { e.currentTarget.style.background="#3A5A9B"; e.currentTarget.style.color="#fff"; }}}
+                        onMouseLeave={e => { if(peutModifier) { e.currentTarget.style.background="#f0f4ff"; e.currentTarget.style.color="#3A5A9B"; }}}
+                        title={!peutModifier ? "Commandes fermées" : ""}
+                      >{peutModifier ? "✏️ Modifier" : "🔒 Modifier"}</button>
+                    );
+                  })()}
 
-                  {cmd.status !== "Annulé" && (
+                  {cmd.status === "Archivé" ? (
+                    <button
+                      onClick={() => onUpdateStatus(cmd.id, "En cours")}
+                      style={{ flex:1, minWidth:90, padding:"7px 6px", borderRadius:7, border:"1.5px solid #7A8A6A", background:"#f5f8f4", color:"#4A6741", cursor:"pointer", fontSize:11, fontWeight:700, transition:"all .15s" }}
+                      onMouseEnter={e => { e.currentTarget.style.background="#4A6741"; e.currentTarget.style.color="#fff"; }}
+                      onMouseLeave={e => { e.currentTarget.style.background="#f5f8f4"; e.currentTarget.style.color="#4A6741"; }}
+                    >♻️ Désarchiver</button>
+                  ) : (
+                    <button
+                      onClick={() => onUpdateStatus(cmd.id, "Archivé")}
+                      style={{ flex:1, minWidth:80, padding:"7px 6px", borderRadius:7, border:"1.5px solid #7A8A6A", background:"#f5f8f4", color:"#4A6741", cursor:"pointer", fontSize:11, fontWeight:700, transition:"all .15s" }}
+                      onMouseEnter={e => { e.currentTarget.style.background="#4A6741"; e.currentTarget.style.color="#fff"; }}
+                      onMouseLeave={e => { e.currentTarget.style.background="#f5f8f4"; e.currentTarget.style.color="#4A6741"; }}
+                    >🗂 Archiver</button>
+                  )}
+
+                  {cmd.status !== "Annulé" && cmd.status !== "Archivé" && (
                     <button
                       onClick={() => { if (window.confirm(`Annuler la commande ${cmd.id} ?`)) { onUpdateStatus(cmd.id, "Annulé"); } }}
                       style={{ flex:1, minWidth:80, padding:"7px 6px", borderRadius:7, border:"1.5px solid #e74c3c", background:"#fff5f5", color:"#c0392b", cursor:"pointer", fontSize:11, fontWeight:700, transition:"all .15s" }}
@@ -2384,6 +2994,318 @@ function TabHistorique({ history, onUpdateStatus, onUpdateCommande, isAdmin }) {
               </div>
             </div>
           );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── TAB LITIGES ─────────────────────────────────────────────────────────────
+
+const LITIGE_TYPES = [
+  "Non-conformité produit",
+  "Erreur de livraison",
+  "Demande de retour / avoir",
+  "Litige facture / prix",
+];
+const LITIGE_STATUTS = ["Ouvert", "En cours", "Résolu"];
+const LITIGE_STATUT_COLORS = { "Ouvert": "#C0392B", "En cours": "#E67E22", "Résolu": "#217346" };
+
+function ModalNouveauLitige({ fournisseurs, boulangerie, onSave, onClose }) {
+  const [type, setType] = useState(LITIGE_TYPES[0]);
+  const [four, setFour] = useState(fournisseurs[0] || "");
+  const [description, setDescription] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
+    if (!description.trim()) return;
+    setSaving(true);
+    const litige = {
+      id: "LIT-" + Date.now(),
+      date: new Date().toLocaleDateString("fr-FR"),
+      boulangerie,
+      type,
+      fournisseur: four,
+      description: description.trim(),
+      status: "Ouvert",
+      commentaires: [],
+    };
+    await onSave(litige);
+    onClose();
+  };
+
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.5)", zIndex:1200, display:"flex", alignItems:"center", justifyContent:"center" }}>
+      <div style={{ background:"#fff", borderRadius:14, padding:28, width:500, maxWidth:"94vw", boxShadow:"0 8px 40px rgba(0,0,0,.25)", border:"2px solid #D4A96A" }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:20 }}>
+          <h3 style={{ margin:0, fontFamily:"Georgia", color:"#2C1810", fontSize:16 }}>⚠️ Nouveau litige</h3>
+          <button onClick={onClose} style={{ background:"none", border:"none", fontSize:20, cursor:"pointer", color:"#9B7B5A" }}>✕</button>
+        </div>
+        <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+          <div>
+            <label style={{ fontSize:11, fontWeight:700, color:"#8B4513", display:"block", marginBottom:4 }}>Type de litige</label>
+            <select value={type} onChange={e => setType(e.target.value)}
+              style={{ width:"100%", padding:"8px 12px", borderRadius:8, border:"1.5px solid #D4A96A", background:"#fffaf5", color:"#2C1810", fontSize:12, outline:"none" }}>
+              {LITIGE_TYPES.map(t => <option key={t}>{t}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={{ fontSize:11, fontWeight:700, color:"#8B4513", display:"block", marginBottom:4 }}>Fournisseur concerné</label>
+            <select value={four} onChange={e => setFour(e.target.value)}
+              style={{ width:"100%", padding:"8px 12px", borderRadius:8, border:"1.5px solid #D4A96A", background:"#fffaf5", color:"#2C1810", fontSize:12, outline:"none" }}>
+              {fournisseurs.map(f => <option key={f}>{f}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={{ fontSize:11, fontWeight:700, color:"#8B4513", display:"block", marginBottom:4 }}>Description du problème</label>
+            <textarea value={description} onChange={e => setDescription(e.target.value)}
+              rows={4} placeholder="Décrivez le problème en détail…"
+              style={{ width:"100%", padding:"8px 12px", borderRadius:8, border:"1.5px solid #D4A96A", background:"#fffaf5", color:"#2C1810", fontSize:12, outline:"none", resize:"vertical", boxSizing:"border-box", fontFamily:"inherit" }} />
+          </div>
+        </div>
+        <div style={{ display:"flex", gap:10, justifyContent:"flex-end", marginTop:20 }}>
+          <button onClick={onClose} style={{ padding:"9px 18px", borderRadius:9, border:"1.5px solid #D4A96A", background:"#fff", color:"#9B7B5A", cursor:"pointer", fontSize:12, fontWeight:600 }}>Annuler</button>
+          <button onClick={handleSave} disabled={!description.trim() || saving}
+            style={{ padding:"9px 20px", borderRadius:9, border:"none", background: description.trim() ? "linear-gradient(135deg,#C0392B,#922B21)" : "#ccc", color:"#fff", cursor: description.trim() ? "pointer" : "default", fontSize:12, fontWeight:700, fontFamily:"Georgia, serif" }}>
+            {saving ? "⏳ Enregistrement…" : "⚠️ Déclarer le litige"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ModalDetailLitige({ litige, onClose, onUpdateStatus, onAddCommentaire }) {
+  const [newComment, setNewComment] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const handleComment = async () => {
+    if (!newComment.trim()) return;
+    setSaving(true);
+    const commentaire = {
+      date: new Date().toLocaleDateString("fr-FR") + " " + new Date().toLocaleTimeString("fr-FR", { hour:"2-digit", minute:"2-digit" }),
+      texte: newComment.trim(),
+    };
+    await onAddCommentaire(litige.id, commentaire);
+    setNewComment("");
+    setSaving(false);
+  };
+
+  const col = LITIGE_STATUT_COLORS[litige.status] || "#666";
+
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.5)", zIndex:1200, display:"flex", alignItems:"center", justifyContent:"center" }}>
+      <div style={{ background:"#fff", borderRadius:14, padding:28, width:560, maxWidth:"95vw", maxHeight:"88vh", display:"flex", flexDirection:"column", boxShadow:"0 8px 40px rgba(0,0,0,.25)", border:"2px solid #D4A96A" }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:16 }}>
+          <div>
+            <div style={{ fontSize:11, color:"#9B7B5A", marginBottom:2 }}>{litige.id} · {litige.date}</div>
+            <h3 style={{ margin:0, fontFamily:"Georgia", color:"#2C1810", fontSize:15 }}>{litige.type}</h3>
+          </div>
+          <button onClick={onClose} style={{ background:"none", border:"none", fontSize:20, cursor:"pointer", color:"#9B7B5A" }}>✕</button>
+        </div>
+
+        <div style={{ display:"flex", gap:8, marginBottom:14, flexWrap:"wrap" }}>
+          <span style={{ padding:"3px 10px", borderRadius:10, background:col+"22", color:col, fontSize:11, fontWeight:700 }}>{litige.status}</span>
+          <span style={{ padding:"3px 10px", borderRadius:10, background:"#f5f5f5", color:"#555", fontSize:11 }}>🏭 {litige.fournisseur}</span>
+          <span style={{ padding:"3px 10px", borderRadius:10, background:"#f5f5f5", color:"#555", fontSize:11 }}>🏪 {litige.boulangerie}</span>
+        </div>
+
+        <div style={{ background:"#FFF8F0", border:"1px solid #EDD5B3", borderRadius:9, padding:"10px 14px", marginBottom:14, fontSize:12, color:"#2C1810", lineHeight:1.6 }}>
+          {litige.description}
+        </div>
+
+        {/* Changement de statut */}
+        <div style={{ display:"flex", gap:6, marginBottom:16, flexWrap:"wrap" }}>
+          <span style={{ fontSize:11, fontWeight:700, color:"#8B4513", alignSelf:"center" }}>Statut :</span>
+          {LITIGE_STATUTS.map(s => (
+            <button key={s} onClick={() => onUpdateStatus(litige.id, s)}
+              style={{
+                padding:"4px 12px", borderRadius:8, fontSize:11, fontWeight:700, cursor:"pointer",
+                border: `1.5px solid ${LITIGE_STATUT_COLORS[s]}`,
+                background: litige.status === s ? LITIGE_STATUT_COLORS[s] : "#fff",
+                color: litige.status === s ? "#fff" : LITIGE_STATUT_COLORS[s],
+              }}>
+              {s}
+            </button>
+          ))}
+        </div>
+
+        {/* Commentaires */}
+        <div style={{ flex:1, overflowY:"auto", marginBottom:12 }}>
+          <div style={{ fontSize:11, fontWeight:700, color:"#8B4513", marginBottom:8 }}>Suivi / Commentaires</div>
+          {(!litige.commentaires || litige.commentaires.length === 0) ? (
+            <div style={{ fontSize:11, color:"#b89878", fontStyle:"italic", padding:"8px 0" }}>Aucun commentaire pour l'instant.</div>
+          ) : (
+            <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+              {litige.commentaires.map((c, i) => (
+                <div key={i} style={{ background:"#FAF6F0", borderRadius:8, padding:"8px 12px", border:"1px solid #EDD5B3" }}>
+                  <div style={{ fontSize:10, color:"#9B7B5A", marginBottom:3 }}>{c.date}</div>
+                  <div style={{ fontSize:12, color:"#2C1810" }}>{c.texte}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Nouveau commentaire */}
+        <div style={{ display:"flex", gap:8, alignItems:"flex-end" }}>
+          <textarea value={newComment} onChange={e => setNewComment(e.target.value)}
+            rows={2} placeholder="Ajouter un commentaire de suivi…"
+            style={{ flex:1, padding:"8px 10px", borderRadius:8, border:"1.5px solid #D4A96A", background:"#fffaf5", fontSize:12, outline:"none", resize:"none", fontFamily:"inherit" }} />
+          <button onClick={handleComment} disabled={!newComment.trim() || saving}
+            style={{ padding:"8px 14px", borderRadius:8, border:"none", background: newComment.trim() ? "#8B4513" : "#ccc", color:"#fff", cursor: newComment.trim() ? "pointer" : "default", fontSize:12, fontWeight:700, flexShrink:0 }}>
+            {saving ? "⏳" : "Envoyer"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TabLitiges({ litiges, boulangerieId, isAdmin, onSave, onUpdateStatus, onAddCommentaire }) {
+  const [showModal, setShowModal] = useState(false);
+  const [detailLitige, setDetailLitige] = useState(null);
+  const [filterStatut, setFilterStatut] = useState("Tous");
+  const [filterType, setFilterType] = useState("Tous");
+  const [filterFour, setFilterFour] = useState("Tous");
+
+  const boulangerieName = isAdmin ? null : BOULANGERIES.find(b => b.id === boulangerieId)?.name;
+
+  const filtered = litiges.filter(l => {
+    if (!isAdmin && l.boulangerie !== boulangerieName) return false;
+    if (filterStatut !== "Tous" && l.status !== filterStatut) return false;
+    if (filterType !== "Tous" && l.type !== filterType) return false;
+    if (filterFour !== "Tous" && l.fournisseur !== filterFour) return false;
+    return true;
+  });
+
+  const fournisseursDispos = [...new Set(litiges.map(l => l.fournisseur))].sort();
+  const nbOuverts = litiges.filter(l => l.status === "Ouvert" && (!boulangerieName || l.boulangerie === boulangerieName)).length;
+
+  // Mettre à jour le litige dans la modale détail après un changement
+  const handleUpdateStatus = async (id, status) => {
+    await onUpdateStatus(id, status);
+    setDetailLitige(prev => prev ? { ...prev, status } : null);
+  };
+
+  const handleAddCommentaire = async (id, commentaire) => {
+    await onAddCommentaire(id, commentaire);
+    setDetailLitige(prev => prev ? { ...prev, commentaires: [...(prev.commentaires||[]), commentaire] } : null);
+  };
+
+  return (
+    <div>
+      {showModal && (
+        <ModalNouveauLitige
+          fournisseurs={FOURNISSEURS_LIST}
+          boulangerie={boulangerieName || BOULANGERIES.find(b => b.id === boulangerieId)?.name || ""}
+          onSave={onSave}
+          onClose={() => setShowModal(false)}
+        />
+      )}
+      {detailLitige && (
+        <ModalDetailLitige
+          litige={detailLitige}
+          onClose={() => setDetailLitige(null)}
+          onUpdateStatus={handleUpdateStatus}
+          onAddCommentaire={handleAddCommentaire}
+        />
+      )}
+
+      {/* Header */}
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16, flexWrap:"wrap", gap:10 }}>
+        <div>
+          <h2 style={{ margin:0, fontFamily:"Georgia", color:"#2C1810", fontSize:16 }}>⚠️ Litiges fournisseurs</h2>
+          {nbOuverts > 0 && (
+            <div style={{ fontSize:11, color:"#C0392B", fontWeight:700, marginTop:3 }}>
+              {nbOuverts} litige{nbOuverts > 1 ? "s" : ""} ouvert{nbOuverts > 1 ? "s" : ""}
+            </div>
+          )}
+        </div>
+        <button onClick={() => setShowModal(true)}
+          style={{ padding:"9px 18px", borderRadius:9, border:"none", background:"linear-gradient(135deg,#C0392B,#922B21)", color:"#fff", cursor:"pointer", fontSize:12, fontWeight:700, fontFamily:"Georgia, serif", boxShadow:"0 3px 12px rgba(192,57,43,.3)" }}>
+          ⚠️ Déclarer un litige
+        </button>
+      </div>
+
+      {/* Filtres */}
+      <div style={{ display:"flex", gap:8, marginBottom:16, flexWrap:"wrap" }}>
+        <select value={filterStatut} onChange={e => setFilterStatut(e.target.value)}
+          style={{ padding:"7px 10px", border:"1.5px solid #D4A96A", borderRadius:8, background:"#fffaf5", color:"#2C1810", fontSize:11, cursor:"pointer", outline:"none" }}>
+          <option value="Tous">Tous les statuts</option>
+          {LITIGE_STATUTS.map(s => <option key={s}>{s}</option>)}
+        </select>
+        <select value={filterType} onChange={e => setFilterType(e.target.value)}
+          style={{ padding:"7px 10px", border:"1.5px solid #D4A96A", borderRadius:8, background:"#fffaf5", color:"#2C1810", fontSize:11, cursor:"pointer", outline:"none" }}>
+          <option value="Tous">Tous les types</option>
+          {LITIGE_TYPES.map(t => <option key={t}>{t}</option>)}
+        </select>
+        {isAdmin && (
+          <select value={filterFour} onChange={e => setFilterFour(e.target.value)}
+            style={{ padding:"7px 10px", border:"1.5px solid #D4A96A", borderRadius:8, background:"#fffaf5", color:"#2C1810", fontSize:11, cursor:"pointer", outline:"none" }}>
+            <option value="Tous">Tous les fournisseurs</option>
+            {fournisseursDispos.map(f => <option key={f}>{f}</option>)}
+          </select>
+        )}
+        <span style={{ fontSize:11, color:"#9B7B5A", alignSelf:"center" }}>{filtered.length} litige(s)</span>
+      </div>
+
+      {/* Liste */}
+      {filtered.length === 0 ? (
+        <div style={{ textAlign:"center", padding:50, color:"#b89878" }}>
+          <div style={{ fontSize:36, marginBottom:10 }}>✅</div>
+          <div style={{ fontSize:13, fontWeight:600 }}>Aucun litige en cours</div>
+        </div>
+      ) : (
+        <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+          {[...filtered].sort((a,b) => {
+            const order = { "Ouvert":0, "En cours":1, "Résolu":2 };
+            return (order[a.status]??3) - (order[b.status]??3);
+          }).map(l => {
+            const col = LITIGE_STATUT_COLORS[l.status] || "#666";
+            return (
+              <div key={l.id} style={{
+                background:"#fff", borderRadius:12, border:`1.5px solid ${l.status === "Ouvert" ? "#e74c3c55" : "#EDD5B3"}`,
+                boxShadow: l.status === "Ouvert" ? "0 2px 12px rgba(192,57,43,.08)" : "0 2px 8px rgba(139,69,19,.05)",
+                overflow:"hidden", transition:"all .15s"
+              }}>
+                <div style={{ padding:"12px 16px" }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:8, marginBottom:6 }}>
+                    <div style={{ flex:1 }}>
+                      <div style={{ fontSize:10, color:"#9B7B5A", marginBottom:2 }}>{l.id} · {l.date}</div>
+                      <div style={{ fontSize:13, fontWeight:700, color:"#2C1810", fontFamily:"Georgia" }}>{l.type}</div>
+                    </div>
+                    <span style={{ padding:"3px 10px", borderRadius:10, background:col+"22", color:col, fontSize:11, fontWeight:700, whiteSpace:"nowrap", flexShrink:0 }}>
+                      {l.status}
+                    </span>
+                  </div>
+                  <div style={{ display:"flex", gap:8, marginBottom:8, flexWrap:"wrap" }}>
+                    <span style={{ fontSize:11, color:"#7A8A6A" }}>🏭 {l.fournisseur}</span>
+                    {isAdmin && <span style={{ fontSize:11, color:"#9B7B5A" }}>🏪 {l.boulangerie}</span>}
+                    {l.commentaires?.length > 0 && <span style={{ fontSize:11, color:"#5B7FA6" }}>💬 {l.commentaires.length} commentaire(s)</span>}
+                  </div>
+                  <div style={{ fontSize:11, color:"#555", lineHeight:1.5, marginBottom:10,
+                    display:"-webkit-box", WebkitLineClamp:2, WebkitBoxOrient:"vertical", overflow:"hidden" }}>
+                    {l.description}
+                  </div>
+                  <div style={{ display:"flex", gap:6 }}>
+                    <button onClick={() => setDetailLitige(l)}
+                      style={{ flex:1, padding:"6px 10px", borderRadius:7, border:"1.5px solid #D4A96A", background:"#fffaf5", color:"#8B4513", cursor:"pointer", fontSize:11, fontWeight:700, transition:"all .15s" }}
+                      onMouseEnter={e => { e.currentTarget.style.background="#8B4513"; e.currentTarget.style.color="#fff"; }}
+                      onMouseLeave={e => { e.currentTarget.style.background="#fffaf5"; e.currentTarget.style.color="#8B4513"; }}
+                    >👁 Voir / Commenter</button>
+                    {l.status !== "Résolu" && (
+                      <button onClick={() => onUpdateStatus(l.id, "Résolu")}
+                        style={{ padding:"6px 12px", borderRadius:7, border:"1.5px solid #217346", background:"#f0fff4", color:"#217346", cursor:"pointer", fontSize:11, fontWeight:700, transition:"all .15s" }}
+                        onMouseEnter={e => { e.currentTarget.style.background="#217346"; e.currentTarget.style.color="#fff"; }}
+                        onMouseLeave={e => { e.currentTarget.style.background="#f0fff4"; e.currentTarget.style.color="#217346"; }}
+                      >✓ Résolu</button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
           })}
         </div>
       )}
@@ -3336,8 +4258,6 @@ function ModalRecette({ recette, boulangerieId, isAdmin, produits, onClose, onSa
 }
 
 
-// ─── TAB VERIFICATION FACTURES ───────────────────────────────────────────────
-
 const FOURNISSEURS_FACTURES = [
   "Fuseau", "BackEurop THOMAS", "TeamOuest France Frais",
   "Richard Distribution", "Minoterie Girardeau"
@@ -3824,7 +4744,6 @@ function ModalAssocierProduit({ ligne, produits, fournisseur, recherche, setRech
   );
 }
 
-
 // Pour changer un mot de passe, modifiez simplement la valeur "pwd" du compte concerné
 const COMPTES = [
   { pwd: "admin2025",   role: "admin",       boulangerieId: null, label: "Administrateur" },
@@ -4119,6 +5038,11 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState(false);
+  const [litiges, setLitiges] = useState([]);
+  const [fenetres, setFenetres] = useState(FENETRES_DEFAULT);
+  const [annonces, setAnnonces] = useState([]);
+  const [annonceActive, setAnnonceActive] = useState(null);
+  const [showGererAnnonces, setShowGererAnnonces] = useState(false);
 
   // ── Mercuriale ──
   const [produits, setProduits] = useState(ALL_PRODUCTS);
@@ -4157,6 +5081,13 @@ export default function App() {
     try {
       await postToSheets(SHEETS_URL, { action: "saveFavoris", boulangerieId: boulId, favoris: nouveaux });
     } catch(e) { console.error("Erreur sauvegarde favoris", e); }
+  };
+
+  const reordonnerFavoris = async (nouvelOrdre) => {
+    setFavoris(nouvelOrdre);
+    try {
+      await postToSheets(SHEETS_URL, { action: "saveFavoris", boulangerieId: boulangerieId, favoris: nouvelOrdre });
+    } catch(e) { console.error("Erreur sauvegarde ordre favoris", e); }
   };
 
   // ── Brouillon panier matières premières ──
@@ -4305,6 +5236,9 @@ export default function App() {
     chargerMercuriale();
     chargerFavoris(compteChoisi.boulangerieId);
     chargerBrouillon(compteChoisi.boulangerieId);
+    chargerLitiges();
+    chargerFenetre();
+    chargerAnnonces(compteChoisi.boulangerieId);
   };
 
   if (!compte) return <LoginScreen onLogin={handleLogin} />;
@@ -4381,14 +5315,90 @@ export default function App() {
     }
   };
 
+  // ── Litiges ──
+  const chargerLitiges = async () => {
+    try {
+      const res = await fetch(SHEETS_URL + `?action=getLitiges`);
+      const data = JSON.parse(await res.text());
+      if (data.success) setLitiges(data.litiges || []);
+    } catch(e) { console.error("Erreur chargement litiges", e); }
+  };
+
+  const chargerFenetre = async () => {
+    try {
+      const res = await fetch(SHEETS_URL + "?action=getFenetre");
+      const data = JSON.parse(await res.text());
+      if (data.success && data.fenetres) setFenetres(data.fenetres);
+    } catch(e) { console.error("Erreur chargement fenêtres", e); }
+  };
+
+  const saveFenetre = async (newFenetres) => {
+    setFenetres(newFenetres);
+    try {
+      await postToSheets(SHEETS_URL, { action: "saveFenetre", fenetres: newFenetres });
+    } catch(e) { console.error("Erreur sauvegarde fenêtres", e); }
+  };
+
+  const chargerAnnonces = async (boulId) => {
+    try {
+      const res = await fetch(SHEETS_URL + "?action=getAnnonces");
+      const data = JSON.parse(await res.text());
+      if (!data.success) return;
+      const today = new Date().toISOString().split("T")[0];
+      const actives = (data.annonces || []).filter(a =>
+        a.expiration >= today &&
+        (!a.cibles || a.cibles.length === 0 ||
+          a.cibles.map(c => Number(c)).includes(Number(boulId)))
+      );
+      setAnnonces(data.annonces || []);
+      if (actives.length > 0) setAnnonceActive(actives[0]);
+    } catch(e) { console.error("Erreur chargement annonces", e); }
+  };
+
+  const saveAnnonce = async (annonce) => {
+    setAnnonces(prev => [annonce, ...prev]);
+    try {
+      await postToSheets(SHEETS_URL, { action: "saveAnnonce", annonce });
+    } catch(e) { console.error("Erreur sauvegarde annonce", e); }
+  };
+
+  const deleteAnnonce = async (id) => {
+    setAnnonces(prev => prev.filter(a => a.id !== id));
+    try {
+      await postToSheets(SHEETS_URL, { action: "deleteAnnonce", id });
+    } catch(e) { console.error("Erreur suppression annonce", e); }
+  };
+
+  const saveLitige = async (litige) => {
+    setLitiges(prev => [litige, ...prev]);
+    try {
+      await postToSheets(SHEETS_URL, { action: "saveLitige", litige });
+    } catch(e) { console.error("Erreur sauvegarde litige", e); }
+  };
+
+  const updateLitigeStatus = async (id, status) => {
+    setLitiges(prev => prev.map(l => l.id === id ? { ...l, status } : l));
+    try {
+      await postToSheets(SHEETS_URL, { action: "updateLitigeStatus", id, status });
+    } catch(e) { console.error("Erreur statut litige", e); }
+  };
+
+  const addLitigeCommentaire = async (id, commentaire) => {
+    setLitiges(prev => prev.map(l => l.id === id ? { ...l, commentaires: [...(l.commentaires||[]), commentaire] } : l));
+    try {
+      await postToSheets(SHEETS_URL, { action: "addLitigeCommentaire", id, commentaire });
+    } catch(e) { console.error("Erreur commentaire litige", e); }
+  };
+
   const tabs = [
     { id: "dashboard",   label: "Tableau de bord",            icon: "📊" },
     { id: "commande",    label: "Commande matières premières", icon: "🌾" },
     { id: "emballages",  label: "Commande emballages",         icon: "📦" },
     { id: "patisserie",  label: "Commande pâtisserie",         icon: "🍰" },
     { id: "coutmatiere", label: "Coût matière",                icon: "🧮" },
-    { id: "factures",    label: "Vérif. factures",             icon: "🔍" },
     { id: "historique",  label: "Historique",                  icon: "📋" },
+    { id: "litiges",     label: "Litiges",                     icon: "⚠️" },
+    { id: "factures",    label: "Vérif. factures",             icon: "🔍" },
   ];
 
   return (
@@ -4437,12 +5447,40 @@ export default function App() {
             title="Rafraîchir les commandes"
           >{loading ? "⏳" : "🔄"}</button>
 
+          {isAdmin && (
+            <button onClick={() => setShowGererAnnonces(true)}
+              style={{ padding:"7px 12px", borderRadius:9, border:"1.5px solid #D4A96A", background:"#fff", color:"#8B4513", cursor:"pointer", fontSize:11, fontWeight:700, whiteSpace:"nowrap", flexShrink:0, position:"relative" }}
+              title="Gérer les annonces">
+              📣 <span className="pap-header-btn-text">Annonces</span>
+              {annonces.filter(a => a.expiration >= new Date().toISOString().split("T")[0]).length > 0 && (
+                <span style={{ position:"absolute", top:-4, right:-4, background:"#C0392B", color:"#fff", borderRadius:10, fontSize:9, fontWeight:800, padding:"1px 5px" }}>
+                  {annonces.filter(a => a.expiration >= new Date().toISOString().split("T")[0]).length}
+                </span>
+              )}
+            </button>
+          )}
+
           <button onClick={() => { setCompte(null); setBoulangerieId(null); setHistory([]); setCart([]); }}
             style={{ padding:"7px 12px", borderRadius:9, border:"1.5px solid #D4A96A", background:"#fff", color:"#9B7B5A", cursor:"pointer", fontSize:11, fontWeight:600, whiteSpace:"nowrap", flexShrink:0 }}
             title="Se déconnecter"
           >🔒 <span className="pap-header-btn-text">Déconnexion</span></button>
         </div>
       </div>
+
+      {/* Popup annonce */}
+      {annonceActive && (
+        <PopupAnnonce annonce={annonceActive} onClose={() => setAnnonceActive(null)} />
+      )}
+
+      {/* Modale gestion annonces admin */}
+      {showGererAnnonces && (
+        <ModalGererAnnonces
+          annonces={annonces}
+          onSave={saveAnnonce}
+          onDelete={deleteAnnonce}
+          onClose={() => setShowGererAnnonces(false)}
+        />
+      )}
 
       {/* Bannière brouillon matières premières */}
       {brouillon && Array.isArray(brouillon) && brouillon.length > 0 && cart.length === 0 && (
@@ -4492,6 +5530,11 @@ export default function App() {
             {t.id==="historique" && historyVisible.length > 0 && (
               <span style={{ background:"#EDD5B3", color:"#8B4513", borderRadius:10, fontSize:10, padding:"1px 6px" }}>{historyVisible.length}</span>
             )}
+            {t.id==="litiges" && litiges.filter(l => l.status === "Ouvert").length > 0 && (
+              <span style={{ background:"#C0392B", color:"#fff", borderRadius:10, fontSize:10, padding:"1px 6px", fontWeight:800 }}>
+                {litiges.filter(l => l.status === "Ouvert").length}
+              </span>
+            )}
           </button>
         ))}
       </div>
@@ -4500,12 +5543,13 @@ export default function App() {
       <div className="pap-content">
         <div className="pap-card-inner" style={{ background:"#fff", borderRadius:14, boxShadow:"0 2px 14px rgba(139,69,19,.07)", border:"1px solid #EDD5B3", minHeight:400 }}>
           {tab==="dashboard"   && <TabDashboard history={historyVisible} />}
-          {tab==="commande"    && <TabCommande cart={cart} setCart={setCartWithSave} boulangerieId={boulangerieId} addToHistory={addToHistory} produits={produits} setProduits={setProduits} favoris={favoris} toggleFavori={toggleFavori} history={history} />}
+          {tab==="commande"    && <TabCommande cart={cart} setCart={setCartWithSave} boulangerieId={boulangerieId} addToHistory={addToHistory} produits={produits} setProduits={setProduits} favoris={favoris} toggleFavori={toggleFavori} reordonnerFavoris={reordonnerFavoris} history={history} isAdmin={isAdmin} fenetres={fenetres} onSaveFenetre={saveFenetre} />}
           {tab==="emballages"  && <TabEmballages emballages={emballages} boulangerieId={boulangerieId} isAdmin={isAdmin} onAjouter={ajouterEmballage} onModifierStock={modifierStockEmb} onCommander={passerCommandeEmb} />}
           {tab==="patisserie"  && <TabPatisserie boulangerieId={boulangerieId} compte={compte} isAdmin={isAdmin} />}
           {tab==="coutmatiere" && <TabCoutMatiere boulangerieId={boulangerieId} isAdmin={isAdmin} produits={produits} />}
+          {tab==="historique"  && <TabHistorique history={historyVisible} onUpdateStatus={updateStatus} onUpdateCommande={updateCommande} onAddCommande={addToHistory} isAdmin={isAdmin} fenetres={fenetres} />}
+          {tab==="litiges"     && <TabLitiges litiges={litiges} boulangerieId={boulangerieId} isAdmin={isAdmin} onSave={saveLitige} onUpdateStatus={updateLitigeStatus} onAddCommentaire={addLitigeCommentaire} />}
           {tab==="factures"    && <TabVerifFactures produits={produits} setProduits={setProduits} />}
-          {tab==="historique"  && <TabHistorique history={historyVisible} onUpdateStatus={updateStatus} onUpdateCommande={updateCommande} isAdmin={isAdmin} />}
         </div>
       </div>
     </div>
